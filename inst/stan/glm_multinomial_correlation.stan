@@ -18,131 +18,136 @@ functions{
   }
   
     
-    real abundance_variability_regression(row_vector variability, row_vector abundance, array[] real prec_coeff, real prec_sd, int bimodal_mean_variability_association, real mix_p){
+  real abundance_variability_regression(row_vector variability, row_vector abundance, array[] real prec_coeff, real prec_sd, int bimodal_mean_variability_association, real mix_p){
+    
+    real lp = 0;
+    // If mean-variability association is bimodal such as for single-cell RNA use mixed model
+    if(bimodal_mean_variability_association == 1){
+      for(m in 1:cols(variability))
+      lp += log_mix(mix_p,
+      normal_lpdf(variability[m] | abundance[m] * prec_coeff[2] + prec_coeff[1], prec_sd ),
+      normal_lpdf(variability[m] | abundance[m] * prec_coeff[2] + 1, prec_sd)  // -0.73074903 is what we observe in single-cell dataset Therefore it is safe to fix it for this mixture model as it just want to capture few possible outlier in the association
+      );
       
-      real lp = 0;
-      // If mean-variability association is bimodal such as for single-cell RNA use mixed model
-      if(bimodal_mean_variability_association == 1){
-        for(m in 1:cols(variability))
-        lp += log_mix(mix_p,
-        normal_lpdf(variability[m] | abundance[m] * prec_coeff[2] + prec_coeff[1], prec_sd ),
-        normal_lpdf(variability[m] | abundance[m] * prec_coeff[2] + 1, prec_sd)  // -0.73074903 is what we observe in single-cell dataset Therefore it is safe to fix it for this mixture model as it just want to capture few possible outlier in the association
-        );
+      // If no bimodal
+    } else {
+      lp =  normal_lpdf(variability | abundance * prec_coeff[2] + prec_coeff[1], prec_sd );
+    }
+    
+    return(lp);
+  }
+      
+  real partial_sum_2_lpmf(
+    // Parallel
+    array[] int idx_y,
+    int start,
+    int end,
+    
+    // General
+    int is_proportion,
+    array[,] int y,
+    array[,] real y_proportion,
+    array[] int exposure,  // Sliced
+    
+    // Precision
+    matrix Xa,                   // Sliced
+    matrix alpha,
+    array[] cholesky_factor_corr full_L_Omega, // Sliced
+    array[,] sum_to_zero_vector dummy_mu, // Sliced
+    
+    // Fixed effects
+    matrix X,                   // Sliced
+    matrix beta, 
+    int M, 
+    
+    // Random effects
+    array[] int ncol_X_random_eff,
+    matrix X_random_effect,   // Sliced
+    matrix X_random_effect_2,  // Sliced
+    matrix random_effect,
+    matrix random_effect_2,
+    
+    // truncation
+    array[,] int truncation_not_idx_minimal
+    
+    ){
+      
+      int N = end-start+1; // Number of observations subsetted to this chunk
+      
+      // mu
+      matrix[M, N] mu = (X[idx_y,] * beta)';
+      if(ncol_X_random_eff[1]> 0)
+      mu = mu + (X_random_effect[idx_y,] * random_effect)';
+      
+      if(ncol_X_random_eff[2]>0 )
+      mu = mu + (X_random_effect_2[idx_y,] * random_effect_2)';
+      
+      for(n in 1:N)  mu[,n] = softmax(mu[,n]);
+      
+      // Precision
+      matrix[M, N] precision = (Xa[idx_y,] * alpha)';
+      
+      // vectorisation
+      vector[N*M] mu_array = to_vector(mu);
+      vector[N*M] precision_array = to_vector(exp(precision));
+      int W = count_filtered_indices(truncation_not_idx_minimal, idx_y);
+
+      // truncation
+      if(W == 0){
         
-        // If no bimodal
-      } else {
-        lp =  normal_lpdf(variability | abundance * prec_coeff[2] + prec_coeff[1], prec_sd );
+        // If input is proportions
+        if(is_proportion)
+          return multi_normal_lupdf(
+            to_array_1d(y_proportion[idx_y,]) |
+            (mu_array .* precision_array),
+            (1.0 - mu_array) .* precision_array
+            ) ;
+            
+          // If input is counts
+          else{
+            real target_lp=0;
+            for(n in 1:N){
+              target_lp+=multinomial_lupmf(
+              to_array_1d(y[idx_y,]) |
+              rep_each(exposure[idx_y], M),
+              mu + dummy_mu
+              );
+            }
+            return target_lp;
+          }
+      }
+      else{
+
+        // If truncation is null for my chunk
+        // Get non missing, invert the missing, this will be a big array
+        array[N * M - W] int non_missing_indices = 
+        get_non_missing_indices(
+          N, 
+          M, 
+          filter_missing_indices(truncation_not_idx_minimal, idx_y)
+        );
+
+        // If input is proportions
+         if(is_proportion)
+          return beta_lupdf(
+          to_array_1d(y_proportion[idx_y,])[non_missing_indices] |
+          (mu_array[non_missing_indices] .* precision_array[non_missing_indices]),
+          (1.0 - mu_array[non_missing_indices]) .* precision_array[non_missing_indices]
+          ) ;
+          
+         // If input is counts
+         else
+         return beta_binomial_lupmf(
+          to_array_1d(y[idx_y,])[non_missing_indices] |
+          rep_each(exposure[idx_y], M)[non_missing_indices],
+          (mu_array[non_missing_indices] .* precision_array[non_missing_indices]),
+          (1.0 - mu_array[non_missing_indices]) .* precision_array[non_missing_indices]
+          ) ;
+
       }
       
-      return(lp);
+
     }
-      
-      real partial_sum_2_lpmf(
-        // Parallel
-        array[] int idx_y,
-        int start,
-        int end,
-        
-        // General
-        int is_proportion,
-        array[,] int y,
-        array[,] real y_proportion,
-        array[] int exposure,  // Sliced
-        
-        // Precision
-        matrix Xa,                   // Sliced
-        matrix alpha,
-        
-        // Fixed effects
-        matrix X,                   // Sliced
-        matrix beta, 
-        int M, 
-        
-        // Random effects
-        array[] int ncol_X_random_eff,
-        matrix X_random_effect,   // Sliced
-        matrix X_random_effect_2,  // Sliced
-        matrix random_effect,
-        matrix random_effect_2,
-        
-        // truncation
-        array[,] int truncation_not_idx_minimal
-        
-        ){
-          
-          int N = end-start+1;
-          
-          // mu
-          matrix[M, N] mu = (X[idx_y,] * beta)';
-          if(ncol_X_random_eff[1]> 0)
-          mu = mu + (X_random_effect[idx_y,] * random_effect)';
-          
-          if(ncol_X_random_eff[2]>0 )
-          mu = mu + (X_random_effect_2[idx_y,] * random_effect_2)';
-          
-          for(n in 1:N)  mu[,n] = softmax(mu[,n]);
-          
-          // Precision
-          matrix[M, N] precision = (Xa[idx_y,] * alpha)';
-          
-          // vectorisation
-          vector[N*M] mu_array = to_vector(mu);
-          vector[N*M] precision_array = to_vector(exp(precision));
-          int W = count_filtered_indices(truncation_not_idx_minimal, idx_y);
-
-          // truncation
-          if(W == 0){
-            
-            // If input is proportions
-            if(is_proportion)
-              return beta_lupdf(
-                to_array_1d(y_proportion[idx_y,]) |
-                (mu_array .* precision_array),
-                (1.0 - mu_array) .* precision_array
-                ) ;
-                
-              // If input is counts
-              else
-                return beta_binomial_lupmf(
-                  to_array_1d(y[idx_y,]) |
-                  rep_each(exposure[idx_y], M),
-                  (mu_array .* precision_array),
-                  (1.0 - mu_array) .* precision_array
-                ) ;
-              
-          }
-          else{
-
-            // If truncation is null for my chunk
-            // Get non missing, invert the missing, this will be a big array
-            array[N * M - W] int non_missing_indices = 
-            get_non_missing_indices(
-              N, 
-              M, 
-              filter_missing_indices(truncation_not_idx_minimal, idx_y)
-            );
-
-            // If input is proportions
-             if(is_proportion)
-              return beta_lupdf(
-              to_array_1d(y_proportion[idx_y,])[non_missing_indices] |
-              (mu_array[non_missing_indices] .* precision_array[non_missing_indices]),
-              (1.0 - mu_array[non_missing_indices]) .* precision_array[non_missing_indices]
-              ) ;
-              
-             // If input is counts
-             else
-             return beta_binomial_lupmf(
-              to_array_1d(y[idx_y,])[non_missing_indices] |
-              rep_each(exposure[idx_y], M)[non_missing_indices],
-              (mu_array[non_missing_indices] .* precision_array[non_missing_indices]),
-              (1.0 - mu_array[non_missing_indices]) .* precision_array[non_missing_indices]
-              ) ;
-
-          }
-          
-
-        }
         
         /**
         * Counts the number of rows in missing_indices where the first column matches any value in idx_y.
@@ -339,6 +344,13 @@ parameters{
   // Use the new sum_to_zero_vector type instead of QR decomposition
   array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
   matrix[A, M] alpha; // Variability
+  
+  // Insert correlation structure below
+  matrix[A, M*(M-1)/2] partial_transformed_L_Omega // Additive so is compatible with the original construct
+  // array[A] cholesky_factor_corr[J] L_Omega; // Cholesky factor of correlation, not additive
+  array[A, N * !is_proportion] sum_to_zero_vector[M] dummy_mu; // correlated residuals, not required if responses are proportions
+  // Insert correlation structure above
+  
   // To exclude
   array[2] real prec_coeff;
   real<lower=0> prec_sd;
@@ -370,7 +382,16 @@ transformed parameters{
   // Initialisation
   matrix[C,M] beta;
   matrix[M, N] precision = (Xa * alpha)';
-  
+  arrar[A] cholesky_factor_corr partial_L_Omega; // Correlation matrix for prior likelihood
+  for(aa in 1:A){
+    partial_L_Omega[n] = inverse_transform_Cholesky_factor(to_vector(partial_transformed_L_Omega[n]),M);
+  }
+  matrix[N, M*(M-1)/2] full_transformed_L_Omega = Xa * partial_transformed_L_Omega; // equivalent of precision but for correlation
+  array[N] cholesky_factor_corr full_L_Omega; // inverse-transformed from unconstrained values
+  for(n in 1:N){
+    full_L_Omega[n] = inverse_transform_Cholesky_factor(to_vector(full_transformed_L_Omega[n]),M);
+  }
+
   // Convert sum_to_zero_vector to regular matrix
   for(c in 1:C) {
     beta[c,] = to_row_vector(beta_raw[c]);
@@ -461,6 +482,8 @@ model{
       // Precision
       Xa,                   
       alpha,
+      full_L_Omega,
+      dummy_mu,
       
       // Fixed effects
       X,                   
