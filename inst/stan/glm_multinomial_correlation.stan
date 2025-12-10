@@ -53,7 +53,7 @@ functions{
     matrix Xa,                   // Sliced
     matrix alpha,
     array[] cholesky_factor_corr full_L_Omega, // Sliced
-    array[,] sum_to_zero_vector dummy_mu, // Sliced
+    matrix dummy_mu, // Sliced
     
     // Fixed effects
     matrix X,                   // Sliced
@@ -76,6 +76,10 @@ functions{
       
       // mu
       matrix[M, N] mu = (X[idx_y,] * beta)';
+      
+      if(!is_proportion) // add dummy variable when not using proportions
+      mu = mu + dummy_mu[idx_y,]';
+      
       if(ncol_X_random_eff[1]> 0)
       mu = mu + (X_random_effect[idx_y,] * random_effect)';
       
@@ -87,30 +91,36 @@ functions{
       // Precision
       matrix[M, N] precision = (Xa[idx_y,] * alpha)';
       
-      // vectorisation
-      vector[N*M] mu_array = to_vector(mu);
-      vector[N*M] precision_array = to_vector(exp(precision));
+      // vectorisation // no longer functional due to Cholesky factors not vectorized
+      //vector[N*M] mu_array = to_vector(mu);
+      //vector[N*M] precision_array = to_vector(exp(precision));
+      
+      // truncation
       int W = count_filtered_indices(truncation_not_idx_minimal, idx_y);
 
-      // truncation
+      // target log-probability as multivariate functions are not vectorized with regard to Cholesky factors
+      real target_lp = 0;
+
+      // When no truncation:
       if(W == 0){
         
         // If input is proportions
-        if(is_proportion)
-          return multi_normal_lupdf(
-            to_array_1d(y_proportion[idx_y,]) |
-            (mu_array .* precision_array),
-            (1.0 - mu_array) .* precision_array
-            ) ;
-            
+        if(is_proportion){
+          for(n in 1:N){
+            target_lp += multi_normal_cholesky_lupdf(
+              y_proportion[idx_y[n],] |
+              mu[,idx_y[n]],
+              full_L_Omega[idx_y[n]]
+            );
+          }
+          return target_lp;
+        }
           // If input is counts
           else{
-            real target_lp=0;
             for(n in 1:N){
-              target_lp+=multinomial_lupmf(
-              to_array_1d(y[idx_y,]) |
-              rep_each(exposure[idx_y], M),
-              mu + dummy_mu
+              target_lp += multinomial_lupmf(
+                to_array_1d(y[idx_y[n],]) |
+                mu[,idx_y[n]]
               );
             }
             return target_lp;
@@ -128,25 +138,27 @@ functions{
         );
 
         // If input is proportions
-         if(is_proportion)
-          return beta_lupdf(
-          to_array_1d(y_proportion[idx_y,])[non_missing_indices] |
-          (mu_array[non_missing_indices] .* precision_array[non_missing_indices]),
-          (1.0 - mu_array[non_missing_indices]) .* precision_array[non_missing_indices]
-          ) ;
-          
+         if(is_proportion){
+           for(n in 1:N){
+             target_lp += multi_normal_cholesky_lupdf(
+               y_proportion[idx_y[n]] |
+               mu[,idx_y[n]],
+               full_L_Omega[idx_y[n]]
+            );
+          }
+          return target_lp;
+         }
          // If input is counts
-         else
-         return beta_binomial_lupmf(
-          to_array_1d(y[idx_y,])[non_missing_indices] |
-          rep_each(exposure[idx_y], M)[non_missing_indices],
-          (mu_array[non_missing_indices] .* precision_array[non_missing_indices]),
-          (1.0 - mu_array[non_missing_indices]) .* precision_array[non_missing_indices]
-          ) ;
-
+         else{
+            for(n in 1:N){
+              target_lp += multinomial_lupmf(
+                to_array_1d(y[idx_y[n],]) |
+                mu[,idx_y[n]]
+              );
+            }
+            return target_lp;
+         }
       }
-      
-
     }
         
         /**
@@ -348,7 +360,7 @@ parameters{
   // Insert correlation structure below
   matrix[A, M*(M-1)/2] partial_transformed_L_Omega // Additive so is compatible with the original construct
   // array[A] cholesky_factor_corr[J] L_Omega; // Cholesky factor of correlation, not additive
-  array[A, N * !is_proportion] sum_to_zero_vector[M] dummy_mu; // correlated residuals, not required if responses are proportions
+  array[N * !is_proportion] sum_to_zero_vector[M] dummy_mu_raw; // correlated residuals, not required if responses are proportions
   // Insert correlation structure above
   
   // To exclude
@@ -391,10 +403,16 @@ transformed parameters{
   for(n in 1:N){
     full_L_Omega[n] = inverse_transform_Cholesky_factor(to_vector(full_transformed_L_Omega[n]),M);
   }
+  matrix[N * !is_proportion, M] dummy_mu;
 
   // Convert sum_to_zero_vector to regular matrix
   for(c in 1:C) {
     beta[c,] = to_row_vector(beta_raw[c]);
+  }
+  if(!is_proportion){
+      for(n in 1:N){
+        dummy_mu[n] = to_row_vector(dummy_mu_raw[n]);
+    }
   }
   
   // Non centered parameterisation SD of random effects
