@@ -21,9 +21,9 @@ functions{
     matrix[M,M] LLT = diag_matrix(rep_vector(1,M));
     if(M<=1) return LLT;
     for(i in 2:M){
-      LLT[i,1] = tanh(y[i*(i-1)/2]);
+      LLT[i,1] = tanh(y[i*(i-1)%/%2]);
       for(j in 2:i){
-        LLT[i,j] = tanh(y[i*(i-1)/2+j-1])*sqrt(1-sum(LLT[i,1:j-1]^2));
+        LLT[i,j] = tanh(y[i*(i-1)%/%2+j-1])*sqrt(1-sum(LLT[i,1:j-1]^2));
         }
     }
     //LLT = LLT*LLT';
@@ -378,7 +378,7 @@ parameters{
   matrix[A, M] alpha; // Variability
   
   // Insert correlation structure below
-  matrix[A, M*(M-1)/2] partial_transformed_L_Omega; // Additive so is compatible with the original construct
+  matrix[A, M*(M-1)%/%2] partial_transformed_L_Omega; // Additive so is compatible with the original construct
   // array[A] cholesky_factor_corr[J] L_Omega; // Cholesky factor of correlation, not additive
   array[N * !is_proportion] sum_to_zero_vector[M] dummy_mu_raw; // correlated residuals, not required if responses are proportions
   // Insert correlation structure above
@@ -422,7 +422,7 @@ transformed parameters{
         //)
         ;
   }
-  matrix[N, M*(M-1)/2] full_transformed_L_Omega = Xa * partial_transformed_L_Omega; // equivalent of precision but for correlation
+  matrix[N, M*(M-1)%/%2] full_transformed_L_Omega = Xa * partial_transformed_L_Omega; // equivalent of precision but for correlation
   array[N] cholesky_factor_corr[M] full_L_Omega; // inverse-transformed from unconstrained values
       for(n in 1:N){
         full_L_Omega[n] = //cholesky_decompose(
