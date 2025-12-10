@@ -17,6 +17,18 @@ functions{
     return y;
   }
   
+  matrix inverse_transform_cholesky_factor_corr(vector y, int M){
+    matrix[M,M] LLT = diag_matrix(rep_vector(1,M));
+    if(M<=1) return LLT;
+    for(i in 2:M){
+      LLT[i,1] = tanh(y[i*(i-1)/2]);
+      for(j in 2:i){
+        LLT[i,j] = tanh(y[i*(i-1)/2+j-1])*sqrt(1-sum(LLT[i,1:j-1]^2));
+        }
+    }
+    //LLT = LLT*LLT';
+    return LLT;
+  }
     
   real abundance_variability_regression(row_vector variability, row_vector abundance, array[] real prec_coeff, real prec_sd, int bimodal_mean_variability_association, real mix_p){
     
@@ -52,7 +64,7 @@ functions{
     // Precision
     matrix Xa,                   // Sliced
     matrix alpha,
-    array[] cholesky_factor_corr full_L_Omega, // Sliced
+    matrix full_transformed_L_Omega, // Sliced
     matrix dummy_mu, // Sliced
     
     // Fixed effects
@@ -90,6 +102,8 @@ functions{
       
       // Precision
       matrix[M, N] precision = (Xa[idx_y,] * alpha)';
+      //cholesky_factor_corr[M] full_L_Omega_n; 
+      //for some reason declaring a cholesky factor here prompts an error
       
       // vectorisation // no longer functional due to Cholesky factors not vectorized
       //vector[N*M] mu_array = to_vector(mu);
@@ -108,9 +122,12 @@ functions{
         if(is_proportion){
           for(n in 1:N){
             target_lp += multi_normal_cholesky_lupdf(
-              y_proportion[idx_y[n],] |
+              to_vector(y_proportion[idx_y[n],]) |
               mu[,idx_y[n]],
-              full_L_Omega[idx_y[n]]
+              //cholesky_decompose(
+              inverse_transform_cholesky_factor_corr(
+                to_vector(full_transformed_L_Omega[idx_y[n]]),M)
+                //)
             );
           }
           return target_lp;
@@ -140,10 +157,13 @@ functions{
         // If input is proportions
          if(is_proportion){
            for(n in 1:N){
-             target_lp += multi_normal_cholesky_lupdf(
-               y_proportion[idx_y[n]] |
-               mu[,idx_y[n]],
-               full_L_Omega[idx_y[n]]
+            target_lp += multi_normal_cholesky_lupdf(
+              to_vector(y_proportion[idx_y[n],]) |
+              mu[,idx_y[n]],
+              //cholesky_decompose(
+              inverse_transform_cholesky_factor_corr(
+                to_vector(full_transformed_L_Omega[idx_y[n]]),M)
+                //)
             );
           }
           return target_lp;
@@ -358,7 +378,7 @@ parameters{
   matrix[A, M] alpha; // Variability
   
   // Insert correlation structure below
-  matrix[A, M*(M-1)/2] partial_transformed_L_Omega // Additive so is compatible with the original construct
+  matrix[A, M*(M-1)/2] partial_transformed_L_Omega; // Additive so is compatible with the original construct
   // array[A] cholesky_factor_corr[J] L_Omega; // Cholesky factor of correlation, not additive
   array[N * !is_proportion] sum_to_zero_vector[M] dummy_mu_raw; // correlated residuals, not required if responses are proportions
   // Insert correlation structure above
@@ -394,15 +414,23 @@ transformed parameters{
   // Initialisation
   matrix[C,M] beta;
   matrix[M, N] precision = (Xa * alpha)';
-  arrar[A] cholesky_factor_corr partial_L_Omega; // Correlation matrix for prior likelihood
+  array[A] cholesky_factor_corr[M] partial_L_Omega; // Correlation matrix for hyper-priors
   for(aa in 1:A){
-    partial_L_Omega[n] = inverse_transform_Cholesky_factor(to_vector(partial_transformed_L_Omega[n]),M);
+    partial_L_Omega[aa] = //cholesky_decompose(
+      inverse_transform_cholesky_factor_corr(
+        to_vector(partial_transformed_L_Omega[aa]),M)
+        //)
+        ;
   }
   matrix[N, M*(M-1)/2] full_transformed_L_Omega = Xa * partial_transformed_L_Omega; // equivalent of precision but for correlation
-  array[N] cholesky_factor_corr full_L_Omega; // inverse-transformed from unconstrained values
-  for(n in 1:N){
-    full_L_Omega[n] = inverse_transform_Cholesky_factor(to_vector(full_transformed_L_Omega[n]),M);
-  }
+  array[N] cholesky_factor_corr[M] full_L_Omega; // inverse-transformed from unconstrained values
+      for(n in 1:N){
+        full_L_Omega[n] = //cholesky_decompose(
+          inverse_transform_cholesky_factor_corr(
+            to_vector(full_transformed_L_Omega[n]),M)
+            //)
+            ;
+      }
   matrix[N * !is_proportion, M] dummy_mu;
 
   // Convert sum_to_zero_vector to regular matrix
@@ -500,7 +528,7 @@ model{
       // Precision
       Xa,                   
       alpha,
-      full_L_Omega,
+      full_transformed_L_Omega,
       dummy_mu,
       
       // Fixed effects
@@ -592,6 +620,17 @@ model{
   prec_coeff ~ std_normal();
   // Note: sum_to_zero_vector has built-in priors, no need for explicit std_normal()
   
+  // Hyper priors for the new correlation structure
+  for(aa in 1:A){
+      partial_L_Omega[aa] ~ lkj_corr_cholesky(2);
+  }
+  // Priors for dummy_mu, only matters when using count data
+  if(!is_proportion){
+      for(n in 1:N){
+        dummy_mu[n] ~ multi_normal_cholesky(precision[,n],full_L_Omega[n]);
+    }
+  }
+
   // Random intercept
   if(is_random_effect>0){
 
