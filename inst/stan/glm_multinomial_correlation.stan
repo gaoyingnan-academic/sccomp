@@ -3,7 +3,7 @@
 functions{
  
   #include common_functions.stan
-  
+  #include transform_cholesky_factor.stan
   array[] int rep_each(array[] int x, int K) {
     int N = size(x);
     array[N * K] int y;
@@ -17,19 +17,6 @@ functions{
     return y;
   }
   
-  matrix inverse_transform_cholesky_factor_corr(vector y, int M){
-    matrix[M,M] LLT = diag_matrix(rep_vector(1,M));
-    if(M<=1) return LLT;
-    for(i in 2:M){
-      LLT[i,1] = tanh(y[i*(i-1)%/%2]);
-      for(j in 2:i){
-        LLT[i,j] = tanh(y[i*(i-1)%/%2+j-1])*sqrt(1-sum(LLT[i,1:j-1]^2));
-        }
-    }
-    //LLT = LLT*LLT';
-    return LLT;
-  }
-    
   real abundance_variability_regression(row_vector variability, row_vector abundance, array[] real prec_coeff, real prec_sd, int bimodal_mean_variability_association, real mix_p){
     
     real lp = 0;
@@ -89,17 +76,19 @@ functions{
       // mu
       matrix[M, N] mu = (X[idx_y,] * beta)';
       
-      if(!is_proportion) // add dummy variable when not using proportions
-      mu = mu + dummy_mu[idx_y,]';
-      
       if(ncol_X_random_eff[1]> 0)
       mu = mu + (X_random_effect[idx_y,] * random_effect)';
       
       if(ncol_X_random_eff[2]>0 )
       mu = mu + (X_random_effect_2[idx_y,] * random_effect_2)';
       
-      for(n in 1:N)  mu[,n] = softmax(mu[,n]);
-      
+      if(!is_proportion){
+        mu = mu + dummy_mu[idx_y,]';
+        for(n in 1:N){
+          mu[,n] = softmax(mu[,n]);
+        }
+      }
+
       // Precision
       matrix[M, N] precision = (Xa[idx_y,] * alpha)';
       //cholesky_factor_corr[M] full_L_Omega_n; 
@@ -335,7 +324,7 @@ data{
   // Parallel chain
   int<lower=1> grainsize;
   
-  // Does the design icludes intercept
+  // Does the design includes intercept
   int <lower=0, upper=1> intercept_in_design;
   
   // Random intercept
@@ -367,6 +356,10 @@ transformed data{
   // For parallelisation
   array[N] int array_N;
   for(n in 1:N) array_N[n] = n;
+  
+  // For proportional data
+  array[N * is_proportion,M] real<lower=0, upper=1> y_proportion_clr_transformed;
+  if(is_proportion) y_proportion_clr_transformed = log(y_proportion); // I do not check if the simplexes are valid
     
   // Data vectorised
   // y_array =  to_array_1d(y);
@@ -377,11 +370,9 @@ parameters{
   array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
   matrix[A, M] alpha; // Variability
   
-  // Insert correlation structure below
-  matrix[A, M*(M-1)%/%2] partial_transformed_L_Omega; // Additive so is compatible with the original construct
-  // array[A] cholesky_factor_corr[J] L_Omega; // Cholesky factor of correlation, not additive
-  array[N * !is_proportion] sum_to_zero_vector[M] dummy_mu_raw; // correlated residuals, not required if responses are proportions
-  // Insert correlation structure above
+  // New parameters for correlation
+  array[A] cholesky_factor_corr[M] L_Omega; // Cholesky factor for correlation matrices
+  array[N * !is_proportion] sum_to_zero_vector[M] intermediate_u_raw; // correlated residuals to bridge proportions and read counts
   
   // To exclude
   array[2] real prec_coeff;
@@ -414,24 +405,23 @@ transformed parameters{
   // Initialisation
   matrix[C,M] beta;
   matrix[M, N] precision = (Xa * alpha)';
-  array[A] cholesky_factor_corr[M] partial_L_Omega; // Correlation matrix for hyper-priors
+  
+  // New transformed parameters for correlation
+  matrix[A, M*(M-1)%/%2] transformed_L_Omega; // For unconstrained operations on Cholesky factors
   for(aa in 1:A){
-    partial_L_Omega[aa] = //cholesky_decompose(
-      inverse_transform_cholesky_factor_corr(
-        to_vector(partial_transformed_L_Omega[aa]),M)
-        //)
-        ;
+    transformed_L_Omega[aa] = 
+      to_row_vector(transform_cholesky_factor_corr(L_Omega[aa],M));
   }
-  matrix[N, M*(M-1)%/%2] full_transformed_L_Omega = Xa * partial_transformed_L_Omega; // equivalent of precision but for correlation
-  array[N] cholesky_factor_corr[M] full_L_Omega; // inverse-transformed from unconstrained values
-      for(n in 1:N){
-        full_L_Omega[n] = //cholesky_decompose(
-          inverse_transform_cholesky_factor_corr(
-            to_vector(full_transformed_L_Omega[n]),M)
-            //)
-            ;
-      }
-  matrix[N * !is_proportion, M] dummy_mu;
+  matrix[N, M*(M-1)%/%2] transformed_Xa_L_Omega = Xa * transformed_L_Omega;
+  
+  array[N] cholesky_factor_corr[M] Xa_L_Omega; // inverse-transformed from unconstrained values
+  for(n in 1:N){
+    Xa_L_Omega[n] = 
+      inverse_transform_cholesky_factor_corr(
+        to_vector(transformed_Xa_L_Omega[n]),M);
+  }
+  
+  matrix[N * !is_proportion, M] intermediate_u;
 
   // Convert sum_to_zero_vector to regular matrix
   for(c in 1:C) {
@@ -439,7 +429,7 @@ transformed parameters{
   }
   if(!is_proportion){
       for(n in 1:N){
-        dummy_mu[n] = to_row_vector(dummy_mu_raw[n]);
+        intermediate_u[n] = to_row_vector(intermediate_u_raw[n]);
     }
   }
   
@@ -528,8 +518,8 @@ model{
       // Precision
       Xa,                   
       alpha,
-      full_transformed_L_Omega,
-      dummy_mu,
+      transformed_Xa_L_Omega, // Only used when is_proportion
+      intermediate_mu, // Only used when !is_proportion
       
       // Fixed effects
       X,                   
@@ -620,14 +610,16 @@ model{
   prec_coeff ~ std_normal();
   // Note: sum_to_zero_vector has built-in priors, no need for explicit std_normal()
   
-  // Hyper priors for the new correlation structure
+  // (Hyper-)priors for the correlation matrices
   for(aa in 1:A){
-      partial_L_Omega[aa] ~ lkj_corr_cholesky(2);
+      L_Omega[aa] ~ lkj_corr_cholesky(2);
   }
-  // Priors for dummy_mu, only matters when using count data
+  // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
       for(n in 1:N){
-        dummy_mu[n] ~ multi_normal_cholesky(precision[,n],full_L_Omega[n]);
+        intermediate_u[n] ~ multi_normal_cholesky(
+          rep_vector(0,M),
+          diag_pre_multiply(precision[,n], Xa_L_Omega[n]));
     }
   }
 
