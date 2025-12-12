@@ -21,7 +21,7 @@
     vector[(M*(M-1))%/%2] y;
     if(M<=1) return y; // Returns a vector of length zero
     if(M<=2){
-      y = x[2,1];
+      y[1] = x[2,1];
       return y;
     }
     for(i in 2:M){
