@@ -1,5 +1,3 @@
-
-
 functions{
  
   #include common_functions.stan
@@ -51,8 +49,8 @@ functions{
     // Precision
     matrix Xa,                   // Sliced
     matrix alpha,
-    matrix full_transformed_L_Omega, // Sliced
-    matrix dummy_mu, // Sliced
+    matrix transformed_Xa_L_Omega, // Sliced
+    matrix intermediate_u, // Sliced
     
     // Fixed effects
     matrix X,                   // Sliced
@@ -406,7 +404,7 @@ transformed parameters{
   matrix[C,M] beta;
   matrix[M, N] precision = (Xa * alpha)';
   
-  // New transformed parameters for correlation
+  // Transform Cholesky factors to vectors so they can multiply with the design matrix
   matrix[A, M*(M-1)%/%2] transformed_L_Omega; // For unconstrained operations on Cholesky factors
   for(aa in 1:A){
     transformed_L_Omega[aa] = 
@@ -414,6 +412,7 @@ transformed parameters{
   }
   matrix[N, M*(M-1)%/%2] transformed_Xa_L_Omega = Xa * transformed_L_Omega;
   
+  // Inverse-transform the vectors back to Cholesky factors
   array[N] cholesky_factor_corr[M] Xa_L_Omega; // inverse-transformed from unconstrained values
   for(n in 1:N){
     Xa_L_Omega[n] = 
@@ -519,7 +518,7 @@ model{
       Xa,                   
       alpha,
       transformed_Xa_L_Omega, // Only used when is_proportion
-      intermediate_mu, // Only used when !is_proportion
+      intermediate_u, // Only used when !is_proportion
       
       // Fixed effects
       X,                   
