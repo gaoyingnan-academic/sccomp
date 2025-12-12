@@ -136,6 +136,7 @@
 sccomp_estimate <- function(.data,
                             formula_composition = ~1,
                             formula_variability = ~1,
+                            formula_correlation = ~ 1,
                             
                             sample,
                             cell_group,
@@ -229,6 +230,7 @@ data_to_spread = function(.data, formula, .sample, .cell_group, .count, .groupin
 sccomp_estimate.Seurat <- function(.data,
                                    formula_composition = ~1,
                                    formula_variability = ~1,
+                                   formula_correlation = ~ 1,
                                    
                                    sample,
                                    cell_group,
@@ -327,6 +329,8 @@ sccomp_estimate.Seurat <- function(.data,
 sccomp_estimate.SingleCellExperiment <- function(.data,
                                                  formula_composition = ~1,
                                                  formula_variability = ~1,
+                                                 formula_correlation = ~ 1,
+                                                 
                                                  sample,
                                                  cell_group,
                                                  abundance = NULL,
@@ -425,6 +429,8 @@ sccomp_estimate.SingleCellExperiment <- function(.data,
 sccomp_estimate.DFrame <- function(.data,
                                    formula_composition = ~1,
                                    formula_variability = ~1,
+                                   formula_correlation = ~ 1,
+                                   
                                    sample,
                                    cell_group,
                                    abundance = NULL,
@@ -516,6 +522,7 @@ sccomp_estimate.DFrame <- function(.data,
 sccomp_estimate.data.frame <- function(.data,
                                        formula_composition = ~1,
                                        formula_variability = ~1,
+                                       formula_correlation = ~ 1,
                                        
                                        sample,
                                        cell_group,
@@ -728,8 +735,9 @@ sccomp_estimate.data.frame <- function(.data,
 #' @importFrom tidyr nesting
 #' @importFrom tidyr replace_na
 sccomp_glm_data_frame_raw = function(.data,
-                                     formula_composition = ~ 1 ,
+                                     formula_composition = ~ 1,
                                      formula_variability = ~ 1,
+                                     formula_correlation = ~ 1,
                                      
                                      sample,
                                      cell_group,
@@ -750,6 +758,7 @@ sccomp_glm_data_frame_raw = function(.data,
                                      exclude_priors = FALSE,
                                      bimodal_mean_variability_association = FALSE,
                                      enable_loo = FALSE,
+                                     noise_model = "multi_beta_binomial",
                                      use_data = TRUE,
                                      cores = 4,
                                      mcmc_seed = sample_seed(),
@@ -824,6 +833,7 @@ sccomp_glm_data_frame_raw = function(.data,
       exclude_priors = exclude_priors,
       bimodal_mean_variability_association = bimodal_mean_variability_association,
       enable_loo = enable_loo,
+      noise_model = noise_model,
       use_data = use_data,
       cores = cores,
       test_composition_above_logit_fold_change = test_composition_above_logit_fold_change, .sample_cell_group_pairs_to_exclude = !!.sample_cell_group_pairs_to_exclude,
@@ -841,8 +851,9 @@ sccomp_glm_data_frame_raw = function(.data,
 
 
 sccomp_glm_data_frame_counts = function(.data,
-                                        formula_composition = ~ 1 ,
+                                        formula_composition = ~ 1,
                                         formula_variability = ~ 1,
+                                        formula_correlation = ~ 1,
                                         
                                         sample,
                                         cell_group,
@@ -863,6 +874,7 @@ sccomp_glm_data_frame_counts = function(.data,
                                         exclude_priors = FALSE,
                                         bimodal_mean_variability_association = FALSE,
                                         enable_loo = FALSE,
+                                        noise_model = "multi_beta_binomial",
                                         use_data = TRUE,
                                         cores = 4,
                                         mcmc_seed = sample_seed(),
@@ -996,6 +1008,8 @@ sccomp_glm_data_frame_counts = function(.data,
   # Print design matrix
   message(sprintf("sccomp says: the composition design matrix has columns: %s", data_for_model$X %>% colnames %>% paste(collapse=", ")))
   message(sprintf("sccomp says: the variability design matrix has columns: %s", data_for_model$Xa %>% colnames %>% paste(collapse=", ")))
+  if(is.null(formula_correlation)|>not()) message(sprintf("sccomp says: the correlation design matrix has columns: %s", data_for_model$Xr %>% colnames %>% paste(collapse=", ")))
+
   
   # Force outliers, Get the truncation index
   data_for_model$user_forced_truncation_not_idx = 
