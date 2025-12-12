@@ -1,6 +1,6 @@
   // See https://mc-stan.org/docs/reference-manual/transforms.html#cholesky-factor-of-correlation-matrix-inverse-transform
   matrix inverse_transform_cholesky_factor_corr(vector y, int M){
-    matrix[M,M] x = diag_matrix(rep_vector(1,M));
+    matrix[M,M] x = diag_matrix(rep_vector(0,M));
     if(M<=1) return x;
     if(M<=2){
       x[2,1] = y[1];
@@ -20,7 +20,7 @@
     vector[(M*(M-1))%/%2] y;
     if(M<=1) return y; // Returns a vector of length zero
     if(M<=2){
-      y = x[2,1];
+      y[1] = x[2,1];
       return y;
     }
     for(i in 2:M){
