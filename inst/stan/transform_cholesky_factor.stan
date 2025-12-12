@@ -9,7 +9,7 @@
     for(i in 2:M){
       x[i,1] = tanh(y[1+((i-1)*(i-2))%/%2]);
       for(j in 2:(i-1)){
-        x[i,j] = tanh(y[((i-1)*(i-2)%/%2+j])*sqrt(1-sum(square(x[i,1:(j-1)])));
+        x[i,j] = tanh(y[((i-1)*(i-2))%/%2+j])*sqrt(1-sum(square(x[i,1:(j-1)])));
         }
     }
     return x;
