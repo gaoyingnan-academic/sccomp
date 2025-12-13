@@ -979,6 +979,12 @@ sccomp_glm_data_frame_counts = function(.data,
   # prec_sd ~ normal(0,2);
   # prec_coeff ~ normal(0,5);
   
+  # If formula provided for correlation, enforcing the multinomial model
+  if(is.null(formula_correlation)|>not()){
+    noise_model = "multinomial_correlation"
+    message("sccomp says: for correlated residuals, the multinomial distribution is used; set `formula_correlation`=NULL to use multi-beta-binomial distribution")
+  }
+  
   message("sccomp says: estimation")
   
   data_for_model =
@@ -1035,6 +1041,10 @@ sccomp_glm_data_frame_counts = function(.data,
   data_for_model$exclude_priors = exclude_priors
   data_for_model$enable_loo = enable_loo
   
+  # placeholder for correlation design
+  data_for_model$R = data_for_model$A
+  data_for_model$Xr = data_for_model$Xa
+  
   # # Check that design matrix is not too big
   # if(ncol(data_for_model$X)>20)
   #   message("sccomp says: the design matrix has more than 20 columns. Possibly some numerical factors are erroneously of type character/factor.")
@@ -1044,7 +1054,7 @@ sccomp_glm_data_frame_counts = function(.data,
     
     # Run the first discovery phase with permissive false discovery rate
     fit_model(
-      "glm_multi_beta_binomial",
+      paste0("glm_",noise_model),
       cores= cores,
       quantile = CI,
       inference_method = inference_method,
@@ -1053,7 +1063,8 @@ sccomp_glm_data_frame_counts = function(.data,
       seed = mcmc_seed,
       max_sampling_iterations = max_sampling_iterations,
       pars = c(
-        "beta", "alpha", "prec_coeff","prec_sd",   "alpha_normalised", 
+        "beta", "alpha", "prec_coeff","prec_sd",   "alpha_normalised",
+        "L_Omega", # new addition for correlation
         "random_effect", "random_effect_2", 
         "random_effect_sigma", "random_effect_sigma_2", 
         "log_lik"
