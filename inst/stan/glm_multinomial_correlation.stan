@@ -288,12 +288,14 @@ data{
   int<lower=1> A_intercept_columns; // How many intercept column in varibility design
   int<lower=1> B_intercept_columns; // How many intercept column in varibility design
   int<lower=1> Ar; // Rows of unique variability design
+  int<lower=1> R; // How many column in correlation design
   array[N] int exposure;
   array[N * !is_proportion,M] int<lower=0> y;
   array[N * is_proportion,M] real<lower=0, upper=1> y_proportion;
   matrix[N, C] X;
   matrix[Ar, A] XA; // The unique variability design
   matrix[N, A] Xa; // The variability design
+  matrix[N, R] Xr; // The unique variability design
   
   // Truncation
   int is_truncated;
