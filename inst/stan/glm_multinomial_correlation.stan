@@ -81,7 +81,7 @@ functions{
       mu = mu + (X_random_effect_2[idx_y,] * random_effect_2)';
       
       if(!is_proportion){
-        mu = mu + dummy_mu[idx_y,]';
+        mu = mu + intermediate_u[idx_y,]';
         for(n in 1:N){
           mu[,n] = softmax(mu[,n]);
         }
@@ -113,7 +113,7 @@ functions{
               mu[,idx_y[n]],
               //cholesky_decompose(
               inverse_transform_cholesky_factor_corr(
-                to_vector(full_transformed_L_Omega[idx_y[n]]),M)
+                to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
                 //)
             );
           }
@@ -149,7 +149,7 @@ functions{
               mu[,idx_y[n]],
               //cholesky_decompose(
               inverse_transform_cholesky_factor_corr(
-                to_vector(full_transformed_L_Omega[idx_y[n]]),M)
+                to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
                 //)
             );
           }
@@ -407,12 +407,12 @@ transformed parameters{
   matrix[M, N] precision = (Xa * alpha)';
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
-  matrix[A, M*(M-1)%/%2] transformed_L_Omega; // For unconstrained operations on Cholesky factors
+  matrix[A, (M*(M-1))%/%2] transformed_L_Omega; // For unconstrained operations on Cholesky factors
   for(aa in 1:A){
     transformed_L_Omega[aa] = 
       to_row_vector(transform_cholesky_factor_corr(L_Omega[aa],M));
   }
-  matrix[N, M*(M-1)%/%2] transformed_Xa_L_Omega = Xa * transformed_L_Omega;
+  matrix[N, (M*(M-1))%/%2] transformed_Xa_L_Omega = Xa * transformed_L_Omega;
   
   // Inverse-transform the vectors back to Cholesky factors
   array[N] cholesky_factor_corr[M] Xa_L_Omega; // inverse-transformed from unconstrained values
