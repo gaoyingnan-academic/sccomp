@@ -618,7 +618,7 @@ model{
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n] ~ multi_normal_cholesky(
+        intermediate_u_raw[n] ~ multi_normal_cholesky(
           rep_vector(0,M),
           diag_pre_multiply(precision[,n], Xa_L_Omega[n]));
     }
