@@ -88,13 +88,7 @@ functions{
       }
 
       // Precision
-      matrix[M, N] precision = (Xa[idx_y,] * alpha)';
-      //cholesky_factor_corr[M] full_L_Omega_n; 
-      //for some reason declaring a cholesky factor here prompts an error
-      
-      // vectorisation // no longer functional due to Cholesky factors not vectorized
-      //vector[N*M] mu_array = to_vector(mu);
-      //vector[N*M] precision_array = to_vector(exp(precision));
+      matrix[M, N] precision = exp((Xa[idx_y,] * alpha)');
       
       // truncation
       int W = count_filtered_indices(truncation_not_idx_minimal, idx_y);
@@ -404,7 +398,7 @@ transformed parameters{
   
   // Initialisation
   matrix[C,M] beta;
-  matrix[M, N] precision = (Xa * alpha)';
+  matrix[M, N] precision = exp((Xa * alpha)');
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
   matrix[A, (M*(M-1))%/%2] transformed_L_Omega; // For unconstrained operations on Cholesky factors
