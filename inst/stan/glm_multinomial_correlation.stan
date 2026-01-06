@@ -105,10 +105,8 @@ functions{
             target_lp += multi_normal_cholesky_lupdf(
               to_vector(y_proportion[idx_y[n],]) |
               mu[,idx_y[n]],
-              //cholesky_decompose(
               inverse_transform_cholesky_factor_corr(
                 to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
-                //)
             );
           }
           return target_lp;
@@ -141,10 +139,8 @@ functions{
             target_lp += multi_normal_cholesky_lupdf(
               to_vector(y_proportion[idx_y[n],]) |
               mu[,idx_y[n]],
-              //cholesky_decompose(
               inverse_transform_cholesky_factor_corr(
                 to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
-                //)
             );
           }
           return target_lp;
@@ -409,22 +405,23 @@ transformed parameters{
   matrix[N, (M*(M-1))%/%2] transformed_Xa_L_Omega = Xa * transformed_L_Omega;
   
   // Inverse-transform the vectors back to Cholesky factors
-  array[N] cholesky_factor_corr[M] Xa_L_Omega; // inverse-transformed from unconstrained values
+  array[N] matrix[M,M] Xa_L_Omega; // inverse-transformed from unconstrained values
   for(n in 1:N){
     Xa_L_Omega[n] = 
       inverse_transform_cholesky_factor_corr(
         to_vector(transformed_Xa_L_Omega[n]),M);
   }
-  
   matrix[N * !is_proportion, M] intermediate_u;
 
   // Convert sum_to_zero_vector to regular matrix
   for(c in 1:C) {
     beta[c,] = to_row_vector(beta_raw[c]);
   }
+  
+  // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n] = to_row_vector(intermediate_u_raw[n]);
+        intermediate_u[n] = (to_matrix(Xa_L_Omega[n])*to_vector(intermediate_u_raw[n]))';
     }
   }
   
@@ -612,9 +609,10 @@ model{
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u_raw[n] ~ multi_normal_cholesky(
-          rep_vector(0,M),
-          diag_pre_multiply(precision[,n], Xa_L_Omega[n]));
+        //intermediate_u_raw[n] ~ multi_normal_cholesky(
+        //  rep_vector(0,M),
+        //  diag_pre_multiply(precision[,n], Xa_L_Omega[n]));
+        intermediate_u_raw[n] ~ normal(0.0,precision[,n]);
     }
   }
 
