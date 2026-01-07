@@ -348,8 +348,13 @@ transformed data{
   for(n in 1:N) array_N[n] = n;
   
   // For proportional data
-  array[N * is_proportion,M] real<lower=0, upper=1> y_proportion_clr_transformed;
-  if(is_proportion) y_proportion_clr_transformed = log(y_proportion); // I do not check if the simplexes are valid
+  array[N * is_proportion,M] real y_proportion_clr_transformed;
+  if(is_proportion){
+    y_proportion_clr_transformed = log(y_proportion);
+    for(n in 1:N){
+      y_proportion_clr_transformed[n] = y_proportion_clr_transformed[n] - mean(y_proportion_clr_transformed[n]);
+    }
+  }
     
   // Data vectorised
   // y_array =  to_array_1d(y);
