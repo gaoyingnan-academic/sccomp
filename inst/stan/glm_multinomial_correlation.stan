@@ -64,9 +64,6 @@ functions{
     matrix random_effect,
     matrix random_effect_2,
     
-    // truncation
-    array[,] int truncation_not_idx_minimal
-    
     ){
       
       int N = end-start+1; // Number of observations subsetted to this chunk
@@ -96,183 +93,36 @@ functions{
       // target log-probability as multivariate functions are not vectorized with regard to Cholesky factors
       real target_lp = 0;
 
-      // When no truncation:
-      if(W == 0){
-        
-        // If input is proportions
-        if(is_proportion){
+      // If input is proportions
+      if(is_proportion){
+        for(n in 1:N){
+          target_lp += multi_normal_cholesky_lupdf(
+            to_vector(y_proportion[idx_y[n],]) |
+            mu[,idx_y[n]],
+            inverse_transform_cholesky_factor_corr(
+              to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
+          );
+        }
+        return target_lp;
+      }
+        // If input is counts
+        else{
           for(n in 1:N){
-            target_lp += multi_normal_cholesky_lupdf(
-              to_vector(y_proportion[idx_y[n],]) |
-              mu[,idx_y[n]],
-              inverse_transform_cholesky_factor_corr(
-                to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
+            target_lp += multinomial_lupmf(
+              to_array_1d(y[idx_y[n],]) |
+              mu[,idx_y[n]]
             );
           }
           return target_lp;
         }
-          // If input is counts
-          else{
-            for(n in 1:N){
-              target_lp += multinomial_lupmf(
-                to_array_1d(y[idx_y[n],]) |
-                mu[,idx_y[n]]
-              );
-            }
-            return target_lp;
-          }
-      }
-      else{
-
-        // If truncation is null for my chunk
-        // Get non missing, invert the missing, this will be a big array
-        array[N * M - W] int non_missing_indices = 
-        get_non_missing_indices(
-          N, 
-          M, 
-          filter_missing_indices(truncation_not_idx_minimal, idx_y)
-        );
-
-        // If input is proportions
-         if(is_proportion){
-           for(n in 1:N){
-            target_lp += multi_normal_cholesky_lupdf(
-              to_vector(y_proportion[idx_y[n],]) |
-              mu[,idx_y[n]],
-              inverse_transform_cholesky_factor_corr(
-                to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
-            );
-          }
-          return target_lp;
-         }
-         // If input is counts
-         else{
-            for(n in 1:N){
-              target_lp += multinomial_lupmf(
-                to_array_1d(y[idx_y[n],]) |
-                mu[,idx_y[n]]
-              );
-            }
-            return target_lp;
-         }
-      }
     }
-        
-        /**
-        * Counts the number of rows in missing_indices where the first column matches any value in idx_y.
-        *
-        * @param missing_indices  A two-dimensional integer array of size [TNIM, 2], containing {row, col} pairs of missing elements.
-        * @param idx_y            An integer array containing the row indices to filter on.
-        * @return                 An integer representing the number of rows in missing_indices where the first column matches any value in idx_y.
-        *
-        * @details
-        * This function iterates over missing_indices and counts how many times the first column (row index) matches any value in idx_y.
-        */
-        int count_filtered_indices(array[,] int missing_indices, array[] int idx_y) {
-          int num_missing = dims(missing_indices)[1];  // Number of rows in missing_indices
-          int num_idx_y = num_elements(idx_y);         // Number of elements in idx_y
-          int num_filtered = 0;                        // Initialize the count of filtered rows
-          
-          for (i in 1:num_missing) {
-            for (j in 1:num_idx_y) {
-              if (missing_indices[i, 1] == idx_y[j]) {
-                num_filtered += 1;
-                break;  // Exit the inner loop once a match is found
-              }
-            }
-          }
-          
-          return num_filtered;
-        }
-        
-        /**
-        * Filters the missing_indices matrix to include only rows where the first column matches values in idx_y.
-        *
-        * @param missing_indices  A two-dimensional integer array of size [TNIM, 2], containing {row, col} pairs of missing elements.
-        * @param idx_y            An integer array containing the row indices to filter on.
-        * @return                 A two-dimensional integer array containing only the rows from missing_indices where the first column matches any value in idx_y.
-        *
-        * @details
-        * This function uses the count_filtered_indices function to determine the size of the output array.
-        * It then iterates over missing_indices to collect the matching rows.
-        */
-array[,] int filter_missing_indices(array[,] int missing_indices, array[] int idx_y) {
-  int num_missing = dims(missing_indices)[1];  // Number of rows in missing_indices
-  int num_idx_y = num_elements(idx_y);         // Number of elements in idx_y
-  
-  // Use the count_filtered_indices function to get the number of filtered rows
-  int num_filtered = count_filtered_indices(missing_indices, idx_y);
-  
-  // Allocate the output array with the determined size
-  array[num_filtered, 2] int missing_indices_filtered;
-  
-  // Fill the output array with matching rows
-  int count = 0;
-  for (i in 1:num_missing) {
-    for (j in 1:num_idx_y) {
-      if (missing_indices[i, 1] == idx_y[j]) {
-        count += 1;
-        
-        // Adjust the row index in the filtered array
-        missing_indices_filtered[count, 1] = j;  // Set to the relative position in idx_y
-        missing_indices_filtered[count, 2] = missing_indices[i, 2];  // Keep the column index
-        
-        break;  // Exit the inner loop once a match is found
-      }
-    }
-  }
-  
-  return missing_indices_filtered;
-}        
-        /**
-        * Compute indices of non-missing elements in a matrix when flattened in column-major order.
-        * (Existing function; included here for completeness)
-        */
-        array[] int get_non_missing_indices(int n_rows, int n_cols, array[,] int missing_indices) {
-          // Total number of elements in the matrix
-          int N = n_rows * n_cols;
-          
-          // Number of missing elements
-          int num_missing = dims(missing_indices)[1];  // Assuming missing_indices is [num_missing, 2]
-          
-          // Initialize a matrix to track missing data (0 = not missing, 1 = missing)
-           array[n_rows, n_cols] int is_missing = rep_array(0, n_rows, n_cols);
-           
-          // 
-          // Mark the missing positions in the is_missing matrix
-          for (i in 1:num_missing) {
-            int row = missing_indices[i, 1];  // Row index of missing element
-            int col = missing_indices[i, 2];  // Column index of missing element
-            is_missing[row, col] = 1;         // Mark as missing
-          }
-
-          // Preallocate an array to hold the indices of non-missing elements
-          int max_non_missing = N - num_missing;       // Maximum possible non-missing elements
-          array[max_non_missing] int non_missing_indices;    // Array to store indices
-          int count = 0;                               // Counter for non-missing elements
-
-          // **Iterate over the matrix in row-major order**
-          for (row in 1:n_rows) {
-            for (col in 1:n_cols) {
-              if (is_missing[row, col] == 0) {         // If the element is not missing
-              count += 1;
-              // **Use row-major indexing**
-              non_missing_indices[count] = (row - 1) * n_cols + col;
-              }
-            }
-          }
-
-          // Return the array of non-missing indices (trimmed to the actual count)
-          return non_missing_indices[1:count];
-
-        }
-        
-
+    
 }
+
 data{
   int<lower=0, upper=1> is_proportion;
-  int<lower=1> N;
-  int<lower=1> M;
+  int<lower=1> N; // Equivalent to S in publication
+  int<lower=1> M; // Equivalent to G in publication
   int<lower=1> C;
   int<lower=1> A; // How many column in variability design\
   int<lower=1> A_intercept_columns; // How many intercept column in varibility design
@@ -285,7 +135,7 @@ data{
   matrix[N, C] X;
   matrix[Ar, A] XA; // The unique variability design
   matrix[N, A] Xa; // The variability design
-  matrix[N, R] Xr; // The unique variability design
+  matrix[N, R] Xr; // The correlation design
   
   // Truncation
   int is_truncated;
@@ -336,8 +186,8 @@ data{
   // LOO
   int<lower=0, upper=1> enable_loo;
   
-  
 }
+
 transformed data{
   // EXCEPTION MADE FOR WINDOWS GENERATE QUANTITIES IF RANDOM EFFECT DO NOT EXIST
   int ncol_X_random_eff_WINDOWS_BUG_FIX = max(ncol_X_random_eff[1], 1);
@@ -355,11 +205,9 @@ transformed data{
       y_proportion_clr_transformed[n] = y_proportion_clr_transformed[n] - mean(y_proportion_clr_transformed[n]);
     }
   }
-    
-  // Data vectorised
-  // y_array =  to_array_1d(y);
-  // exposure_array = rep_each(exposure, M);
+  
 }
+
 parameters{
   // Use the new sum_to_zero_vector type instead of QR decomposition
   array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
