@@ -362,7 +362,7 @@ parameters{
   
   // New parameters for correlation
   array[A] cholesky_factor_corr[M] L_Omega; // Cholesky factor for correlation matrices
-  array[N * !is_proportion] sum_to_zero_vector[M] intermediate_u_raw; // correlated residuals to bridge proportions and read counts
+  matrix[N * !is_proportion, M] intermediate_u_raw; // independent components of correlated residuals to bridge proportions and read counts
   
   // To exclude
   array[2] real prec_coeff;
@@ -421,7 +421,7 @@ transformed parameters{
   // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n] = (to_matrix(Xa_L_Omega[n])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n] = (diag_pre_multiply(precision[,n],Xa_L_Omega[n])*to_vector(intermediate_u_raw[n]))';
     }
   }
   
@@ -609,10 +609,7 @@ model{
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
       for(n in 1:N){
-        //intermediate_u_raw[n] ~ multi_normal_cholesky(
-        //  rep_vector(0,M),
-        //  diag_pre_multiply(precision[,n], Xa_L_Omega[n]));
-        intermediate_u_raw[n] ~ normal(0.0,precision[,n]);
+        intermediate_u_raw[n] ~ normal(0.0, 1.0);
     }
   }
 
