@@ -91,8 +91,8 @@ functions{
       if(is_proportion){
         for(n in 1:N){
           target_lp += multi_normal_cholesky_lupdf(
-            to_vector(y_proportion[idx_y[n],]) |
-            mu[,idx_y[n]],
+            to_vector(y_proportion[idx_y[n],1:(M-1)]) |
+            mu[1:(M-1),idx_y[n]],
             diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[n]))
           );
         }
@@ -136,7 +136,6 @@ data{
   array[N,M] int truncation_down;
   int<lower=1, upper=N*M> TNS; // truncation_not_size
   array[TNS] int<lower=1, upper=N*M> truncation_not_idx;
-  
   int TNIM; // truncation_not_size
   array[TNIM,2] int<lower=1, upper=N*M> truncation_not_idx_minimal;
   
@@ -205,11 +204,13 @@ transformed data{
 parameters{
   // Use the new sum_to_zero_vector type instead of QR decomposition
   array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
-  matrix[A, M] alpha; // Variability
   
-  // New parameters for correlation
-  array[A] cholesky_factor_corr[M] L; // Cholesky factor for correlation matrices
-  matrix[N * !is_proportion, M] intermediate_u_raw; // independent components of correlated residuals to bridge proportions and read counts
+  // Variability is constrained to M-1 dimensions due to the sum-to-zero constraint
+  matrix[A, M-1] alpha; 
+  
+  // Correlation is constrained to M-1 dimensions as well
+  array[R] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
+  matrix[N * !is_proportion, M-1] intermediate_u_raw; // independent components of correlated residuals to bridge proportions and read counts
   
   // To exclude
   array[2] real prec_coeff;
@@ -235,30 +236,29 @@ parameters{
   // If I have just one group
   array[is_random_effect>0] real zero_random_effect;
   
-  
 }
+
 transformed parameters{
-  
   // Initialisation
   matrix[C,M] beta;
-  matrix[M, N] precision = exp((Xa * alpha)');
+  matrix[M-1, N] precision = exp((Xa * alpha)');
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
-  matrix[A, (M*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
-  for(aa in 1:A){
-    transformed_L[aa] = 
-      to_row_vector(transform_cholesky_factor_corr(L[aa],M));
+  matrix[R, ((M-2)*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
+  for(r in 1:R){
+    transformed_L[r] = 
+      to_row_vector(transform_cholesky_factor_corr(L[r],M-1));
   }
-  matrix[N, (M*(M-1))%/%2] transformed_Lhat = Xr * transformed_L;
+  matrix[N, ((M-2)*(M-1))%/%2] transformed_Lhat = Xr * transformed_L;
   
   // Inverse-transform the vectors back to Cholesky factors
-  array[N] matrix[M,M] Lhat; // inverse-transformed from unconstrained values
+  array[N] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
   for(n in 1:N){
     Lhat[n] = 
       inverse_transform_cholesky_factor_corr(
-        to_vector(transformed_Lhat[n]),M);
+        to_vector(transformed_Lhat[n]),M-1);
   }
-  matrix[N * !is_proportion, M] intermediate_u;
+  matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
 
   // Convert sum_to_zero_vector to regular matrix
   for(c in 1:C) {
@@ -268,7 +268,9 @@ transformed parameters{
   // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n] = (diag_pre_multiply(precision[,n],Lhat[n])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n,1:(M-1)] = (diag_pre_multiply(precision[,n],Lhat[n])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n,M] = 0.0 - sum(intermediate_u[n,1:(M-1)]);
+        // variance-covariance of the last element is already determined by the previous elements
     }
   }
   
@@ -372,17 +374,6 @@ model{
       random_effect,
       random_effect_2
       );
-      
-      // print("2---", reduce_sum(
-        //   partial_sum_lupmf,
-        //   y_array[truncation_not_idx],
-        //   grainsize,
-        //   exposure_array[truncation_not_idx],
-        //   mu_array[truncation_not_idx],
-        //   precision_array[truncation_not_idx]
-        //   ));
-        
-        
   }
   
   // Priors
@@ -446,8 +437,8 @@ model{
   // Note: sum_to_zero_vector has built-in priors, no need for explicit std_normal()
   
   // (Hyper-)priors for the correlation matrices
-  for(aa in 1:A){
-      L[aa] ~ lkj_corr_cholesky(2);
+  for(r in 1:R){
+      L[r] ~ lkj_corr_cholesky(2);
   }
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
@@ -474,7 +465,8 @@ model{
     for(m in 1:M) random_effect_sigma_raw_2[m] ~ std_normal();
     for(m in 1:M) sigma_correlation_factor_2[m] ~ lkj_corr_cholesky(2);   // LKJ prior for the correlation matrix
     }
-  }
+}
+  
 generated quantities {
   matrix[A, M] alpha_normalised = alpha;
   
