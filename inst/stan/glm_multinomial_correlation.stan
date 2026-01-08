@@ -44,11 +44,11 @@ functions{
     int is_proportion,
     array[,] int y,
     array[,] real y_proportion,
-    array[] int exposure,  // Sliced
     
     // Precision
-    matrix Xa,                   // Sliced
-    matrix alpha,
+    matrix precision,                   // Sliced
+    
+    // Correlation
     matrix transformed_Xa_L_Omega, // Sliced
     matrix intermediate_u, // Sliced
     
@@ -87,9 +87,6 @@ functions{
       // Precision
       matrix[M, N] precision = exp((Xa[idx_y,] * alpha)');
       
-      // truncation
-      int W = count_filtered_indices(truncation_not_idx_minimal, idx_y);
-
       // target log-probability as multivariate functions are not vectorized with regard to Cholesky factors
       real target_lp = 0;
 
@@ -137,7 +134,7 @@ data{
   matrix[N, A] Xa; // The variability design
   matrix[N, R] Xr; // The correlation design
   
-  // Truncation
+  // Truncation (not used but kept for compatibility)
   int is_truncated;
   array[N,M] int truncation_up;
   array[N,M] int truncation_down;
@@ -147,6 +144,7 @@ data{
   int TNIM; // truncation_not_size
   array[TNIM,2] int<lower=1, upper=N*M> truncation_not_idx_minimal;
   
+  // Verbose (for diagnostic and debugging)
   int<lower=0, upper=1> is_vb;
   
   // Prior info
