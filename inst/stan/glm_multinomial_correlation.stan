@@ -249,7 +249,7 @@ transformed parameters{
     transformed_L[aa] = 
       to_row_vector(transform_cholesky_factor_corr(L[aa],M));
   }
-  matrix[N, (M*(M-1))%/%2] transformed_Lhat = Xa * transformed_L;
+  matrix[N, (M*(M-1))%/%2] transformed_Lhat = Xr * transformed_L;
   
   // Inverse-transform the vectors back to Cholesky factors
   array[N] matrix[M,M] Lhat; // inverse-transformed from unconstrained values
