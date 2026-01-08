@@ -49,7 +49,7 @@ functions{
     matrix precision,                   // Sliced
     
     // Correlation
-    matrix transformed_Xa_L_Omega, // Sliced
+    array[] matrix Lhat, // Sliced
     matrix intermediate_u, // Sliced
     
     // Fixed effects
@@ -62,7 +62,7 @@ functions{
     matrix X_random_effect,   // Sliced
     matrix X_random_effect_2,  // Sliced
     matrix random_effect,
-    matrix random_effect_2,
+    matrix random_effect_2
     
     ){
       
@@ -83,9 +83,6 @@ functions{
           mu[,n] = softmax(mu[,n]);
         }
       }
-
-      // Precision
-      matrix[M, N] precision = exp((Xa[idx_y,] * alpha)');
       
       // target log-probability as multivariate functions are not vectorized with regard to Cholesky factors
       real target_lp = 0;
@@ -96,8 +93,7 @@ functions{
           target_lp += multi_normal_cholesky_lupdf(
             to_vector(y_proportion[idx_y[n],]) |
             mu[,idx_y[n]],
-            inverse_transform_cholesky_factor_corr(
-              to_vector(transformed_Xa_L_Omega[idx_y[n]]),M)
+            diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[n]))
           );
         }
         return target_lp;
@@ -196,9 +192,9 @@ transformed data{
   for(n in 1:N) array_N[n] = n;
   
   // For proportional data
-  array[N * is_proportion,M] real y_proportion_clr_transformed;
+  matrix[N * is_proportion,M] y_proportion_clr_transformed;
   if(is_proportion){
-    y_proportion_clr_transformed = log(y_proportion);
+    y_proportion_clr_transformed = to_matrix(log(y_proportion));
     for(n in 1:N){
       y_proportion_clr_transformed[n] = y_proportion_clr_transformed[n] - mean(y_proportion_clr_transformed[n]);
     }
@@ -212,7 +208,7 @@ parameters{
   matrix[A, M] alpha; // Variability
   
   // New parameters for correlation
-  array[A] cholesky_factor_corr[M] L_Omega; // Cholesky factor for correlation matrices
+  array[A] cholesky_factor_corr[M] L; // Cholesky factor for correlation matrices
   matrix[N * !is_proportion, M] intermediate_u_raw; // independent components of correlated residuals to bridge proportions and read counts
   
   // To exclude
@@ -248,19 +244,19 @@ transformed parameters{
   matrix[M, N] precision = exp((Xa * alpha)');
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
-  matrix[A, (M*(M-1))%/%2] transformed_L_Omega; // For unconstrained operations on Cholesky factors
+  matrix[A, (M*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
   for(aa in 1:A){
-    transformed_L_Omega[aa] = 
-      to_row_vector(transform_cholesky_factor_corr(L_Omega[aa],M));
+    transformed_L[aa] = 
+      to_row_vector(transform_cholesky_factor_corr(L[aa],M));
   }
-  matrix[N, (M*(M-1))%/%2] transformed_Xa_L_Omega = Xa * transformed_L_Omega;
+  matrix[N, (M*(M-1))%/%2] transformed_Lhat = Xa * transformed_L;
   
   // Inverse-transform the vectors back to Cholesky factors
-  array[N] matrix[M,M] Xa_L_Omega; // inverse-transformed from unconstrained values
+  array[N] matrix[M,M] Lhat; // inverse-transformed from unconstrained values
   for(n in 1:N){
-    Xa_L_Omega[n] = 
+    Lhat[n] = 
       inverse_transform_cholesky_factor_corr(
-        to_vector(transformed_Xa_L_Omega[n]),M);
+        to_vector(transformed_Lhat[n]),M);
   }
   matrix[N * !is_proportion, M] intermediate_u;
 
@@ -272,7 +268,7 @@ transformed parameters{
   // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n] = (diag_pre_multiply(precision[,n],Xa_L_Omega[n])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n] = (diag_pre_multiply(precision[,n],Lhat[n])*to_vector(intermediate_u_raw[n]))';
     }
   }
   
@@ -356,12 +352,12 @@ model{
       is_proportion,
       y,
       y_proportion,
-      exposure,  
       
       // Precision
-      Xa,                   
-      alpha,
-      transformed_Xa_L_Omega, // Only used when is_proportion
+      precision,                   
+      
+      // Correlation
+      Lhat, // Only used when is_proportion
       intermediate_u, // Only used when !is_proportion
       
       // Fixed effects
@@ -374,11 +370,7 @@ model{
       X_random_effect,   
       X_random_effect_2, 
       random_effect,
-      random_effect_2,
-      
-      //truncation
-      truncation_not_idx_minimal
-      
+      random_effect_2
       );
       
       // print("2---", reduce_sum(
@@ -455,7 +447,7 @@ model{
   
   // (Hyper-)priors for the correlation matrices
   for(aa in 1:A){
-      L_Omega[aa] ~ lkj_corr_cholesky(2);
+      L[aa] ~ lkj_corr_cholesky(2);
   }
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
