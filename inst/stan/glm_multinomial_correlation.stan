@@ -468,12 +468,13 @@ model{
 }
   
 generated quantities {
-  matrix[A, M] alpha_normalised = alpha;
+  //matrix[A, M] alpha_normalised = alpha;
   
   // // Rondom effect
   // matrix[ncol_X_random_eff_WINDOWS_BUG_FIX, M] beta_random_effect;
   // matrix[ncol_X_random_eff_WINDOWS_BUG_FIX_2, M] beta_random_effect_2;
   
+  /**
   // LOO
   vector[TNS] log_lik = rep_vector(0, TNS);
   
@@ -485,7 +486,9 @@ generated quantities {
   else{
     for(a in 1:A) alpha_normalised[a] = alpha[a] - (beta[a] * prec_coeff[2] );
   }
+  **/
   
+  /**
   // LOO
   if(enable_loo==1){
 
@@ -528,5 +531,6 @@ generated quantities {
     }
 
   }
+  **/
 }
 
