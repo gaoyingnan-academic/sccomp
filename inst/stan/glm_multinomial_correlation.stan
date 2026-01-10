@@ -76,17 +76,10 @@ functions{
       
       if(ncol_X_random_eff[2]>0 )
       mu = mu + (X_random_effect_2[idx_y,] * random_effect_2)';
-      
-      if(!is_proportion){
-        mu = mu + intermediate_u[idx_y,]';
-        for(n in 1:N){
-          mu[,n] = softmax(mu[,n]);
-        }
-      }
-      
-      // target log-probability as multivariate functions are not vectorized with regard to Cholesky factors
-      real target_lp = 0;
 
+      // target log-probability
+      real target_lp = 0;
+      
       // If input is proportions
       if(is_proportion){
         for(n in 1:N){
@@ -96,18 +89,24 @@ functions{
             diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[n]))
           );
         }
-        return target_lp;
       }
-        // If input is counts
-        else{
-          for(n in 1:N){
-            target_lp += multinomial_lupmf(
-              to_array_1d(y[idx_y[n],]) |
-              mu[,idx_y[n]]
-            );
-          }
-          return target_lp;
+      // If input is counts
+      else{
+        array[N] int ysum_array; // Pseudo-vectorization
+        mu = mu + intermediate_u[idx_y,]';
+        for(n in 1:N){
+          mu[,n] = softmax(mu[,n]);
+          ysum_array[n] = sum(y[idx_y[n],]);
         }
+        target_lp += multinomial_lupmf(
+          to_array_1d(y[idx_y,]) |
+          to_vector(mu)/N
+        ) - multinomial_lupmf(
+          ysum_array |
+          rep_vector(1.0/N,N)
+        );
+      }
+      return target_lp;
     }
     
 }
