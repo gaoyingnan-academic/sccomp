@@ -49,8 +49,9 @@ functions{
     matrix precision,                   // Sliced
     
     // Correlation
-    array[] matrix Lhat, // Sliced
+    array[] matrix Lhat, 
     matrix intermediate_u, // Sliced
+    array[] int Xr_to_XR, // Sliced
     
     // Fixed effects
     matrix X,                   // Sliced
@@ -86,7 +87,7 @@ functions{
           target_lp += multi_normal_cholesky_lupdf(
             to_vector(y_proportion[idx_y[n],1:(M-1)]) |
             mu[1:(M-1),idx_y[n]],
-            diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[n]))
+            diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[Xr_to_XR[idx_y[n]]]))
           );
         }
       }
@@ -121,13 +122,16 @@ data{
   int<lower=1> B_intercept_columns; // How many intercept column in varibility design
   int<lower=1> Ar; // Rows of unique variability design
   int<lower=1> R; // How many column in correlation design
+  int<lower=1> Rr; // Rows of unique correlation design 
   array[N] int exposure;
   array[N * !is_proportion,M] int<lower=0> y;
   array[N * is_proportion,M] real<lower=0, upper=1> y_proportion;
   matrix[N, C] X;
   matrix[Ar, A] XA; // The unique variability design
   matrix[N, A] Xa; // The variability design
+  matrix[Rr,R] XR; // The unique correlation design
   matrix[N, R] Xr; // The correlation design
+  array[N] int Xr_to_XR; // The indice map of Xr rows to XR rows
   
   // Truncation (not used but kept for compatibility)
   int is_truncated;
@@ -248,14 +252,14 @@ transformed parameters{
     transformed_L[r] = 
       to_row_vector(transform_cholesky_factor_corr(L[r],M-1));
   }
-  matrix[N, ((M-2)*(M-1))%/%2] transformed_Lhat = Xr * transformed_L;
+  matrix[Rr, ((M-2)*(M-1))%/%2] transformed_Lhat = XR * transformed_L;
   
   // Inverse-transform the vectors back to Cholesky factors
-  array[N] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
-  for(n in 1:N){
-    Lhat[n] = 
+  array[Rr] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
+  for(rr in 1:Rr){
+    Lhat[rr] = 
       inverse_transform_cholesky_factor_corr(
-        to_vector(transformed_Lhat[n]),M-1);
+        to_vector(transformed_Lhat[rr]),M-1);
   }
   matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
 
@@ -267,7 +271,7 @@ transformed parameters{
   // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n,1:(M-1)] = (diag_pre_multiply(precision[,n],Lhat[n])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n,1:(M-1)] = (diag_pre_multiply(precision[,n],Lhat[Xr_to_XR[n]])*to_vector(intermediate_u_raw[n]))';
         intermediate_u[n,M] = 0.0 - sum(intermediate_u[n,1:(M-1)]);
         // variance-covariance of the last element is already determined by the previous elements
     }
@@ -360,6 +364,7 @@ model{
       // Correlation
       Lhat, // Only used when is_proportion
       intermediate_u, // Only used when !is_proportion
+      Xr_to_XR, // Only used when is_proportion
       
       // Fixed effects
       X,                   
@@ -417,7 +422,7 @@ model{
       for(a in 1:A_intercept_columns) alpha[a]  ~ normal( prec_coeff[1], prec_sd );
       if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) to_vector(alpha[a]) ~ normal ( 0, 2 );
     }
-    // if ~ 0 + covariuate
+    // if ~ 0 + covariate
     else {
       alpha[1]  ~ normal( prec_coeff[1], prec_sd );
     }
@@ -441,9 +446,10 @@ model{
   }
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
-      for(n in 1:N){
-        intermediate_u_raw[n] ~ normal(0.0, 1.0);
-    }
+    to_vector(intermediate_u_raw) ~ normal(0.0, 1.0);
+    //for(n in 1:N){
+    //  intermediate_u_raw[n] ~ normal(0.0, 1.0);
+    //}
   }
 
   // Random intercept
