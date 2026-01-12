@@ -39,7 +39,7 @@ functions{
     // Correlation
     array[] matrix Lhat, 
     matrix intermediate_u, // Sliced
-    array[] int Xr_to_XR, // Sliced
+    array[] int Xa_to_XA, // Sliced
     
     // Fixed effects
     matrix X,                   // Sliced
@@ -75,7 +75,7 @@ functions{
           target_lp += multi_normal_cholesky_lupdf(
             to_vector(y_proportion[idx_y[n],1:(M-1)]) |
             mu[1:(M-1),idx_y[n]],
-            diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[Xr_to_XR[idx_y[n]]]))
+            diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[Xa_to_XA[idx_y[n]]]))
           );
         }
       }
@@ -109,17 +109,13 @@ data{
   int<lower=1> A_intercept_columns; // How many intercept column in varibility design
   int<lower=1> B_intercept_columns; // How many intercept column in varibility design
   int<lower=1> Ar; // Rows of unique variability design
-  int<lower=1> R; // How many column in correlation design
-  int<lower=1> Rr; // Rows of unique correlation design 
   array[N] int exposure;
   array[N * !is_proportion,M] int<lower=0> y;
   array[N * is_proportion,M] real<lower=0, upper=1> y_proportion;
   matrix[N, C] X;
-  matrix[Ar, A] XA; // The unique variability design
-  matrix[N, A] Xa; // The variability design
-  matrix[Rr,R] XR; // The unique correlation design
-  matrix[N, R] Xr; // The correlation design
-  array[N] int Xr_to_XR; // The indice map of Xr rows to XR rows
+  matrix[Ar, A] XA; // The unique variability and correlation design
+  matrix[N, A] Xa; // The variability and correlation design
+  array[N] int Xa_to_XA; // The indice map of Xa rows to XA rows
   
   // Truncation (not used but kept for compatibility)
   int is_truncated;
@@ -200,7 +196,7 @@ parameters{
   matrix[A, M-1] alpha; 
   
   // Correlation is constrained to M-1 dimensions as well
-  array[R] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
+  array[A] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
   matrix[N * !is_proportion, M-1] intermediate_u_raw; // independent components of correlated residuals to bridge proportions and read counts
   
   // To exclude
@@ -235,19 +231,19 @@ transformed parameters{
   matrix[M-1, N] precision = exp((Xa * alpha)');
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
-  matrix[R, ((M-2)*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
-  for(r in 1:R){
-    transformed_L[r] = 
-      to_row_vector(transform_cholesky_factor_corr(L[r],M-1));
+  matrix[A, ((M-2)*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
+  for(a in 1:A){
+    transformed_L[a] = 
+      to_row_vector(transform_cholesky_factor_corr(L[a],M-1));
   }
-  matrix[Rr, ((M-2)*(M-1))%/%2] transformed_Lhat = XR * transformed_L;
+  matrix[Ar, ((M-2)*(M-1))%/%2] transformed_Lhat = XA * transformed_L;
   
   // Inverse-transform the vectors back to Cholesky factors
-  array[Rr] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
-  for(rr in 1:Rr){
-    Lhat[rr] = 
+  array[Ar] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
+  for(ar in 1:Ar){
+    Lhat[ar] = 
       inverse_transform_cholesky_factor_corr(
-        to_vector(transformed_Lhat[rr]),M-1);
+        to_vector(transformed_Lhat[ar]),M-1);
   }
   matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
 
@@ -259,7 +255,7 @@ transformed parameters{
   // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n,1:(M-1)] = (diag_pre_multiply(precision[,n],Lhat[Xr_to_XR[n]])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n,1:(M-1)] = (diag_pre_multiply(precision[,n],Lhat[Xa_to_XA[n]])*to_vector(intermediate_u_raw[n]))';
         intermediate_u[n,M] = 0.0 - sum(intermediate_u[n,1:(M-1)]);
         // variance-covariance of the last element is already determined by the previous elements
     }
@@ -352,7 +348,7 @@ model{
       // Correlation
       Lhat, // Only used when is_proportion
       intermediate_u, // Only used when !is_proportion
-      Xr_to_XR, // Only used when is_proportion
+      Xa_to_XA, // Only used when is_proportion
       
       // Fixed effects
       X,                   
@@ -429,15 +425,12 @@ model{
   // Note: sum_to_zero_vector has built-in priors, no need for explicit std_normal()
   
   // (Hyper-)priors for the correlation matrices
-  for(r in 1:R){
-      L[r] ~ lkj_corr_cholesky(2);
+  for(a in 1:A){
+      L[a] ~ lkj_corr_cholesky(2);
   }
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
     to_vector(intermediate_u_raw) ~ normal(0.0, 1.0);
-    //for(n in 1:N){
-    //  intermediate_u_raw[n] ~ normal(0.0, 1.0);
-    //}
   }
 
   // Random intercept
