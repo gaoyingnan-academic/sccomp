@@ -97,7 +97,22 @@ functions{
       }
       return target_lp;
     }
-    
+  
+  tuple(vector,matrix) get_sigma_and_Omega_of_singular_VCoV(matrix VCoV, int is_Cholesky_factor){
+    int cV = cols(VCoV);
+    vector[cV] one_vec = rep_vector(1.0,cV);
+    matrix[cV+1,cV+1] singular_VCoV;
+    vector[cV+1] singular_sigma;
+    if(is_Cholesky_factor){
+      VCoV = VCoV*VCoV';
+    }
+    singular_VCoV[1:cV,1+cV] = -1.0*VCoV*one_vec;
+    singular_VCoV[1+cV,1:cV]= to_row_vector(singular_VCoV[1:cV,1+cV]);
+    singular_VCoV[1+cV,1+cV] = one_vec'*VCoV*one_vec;
+    singular_sigma = sqrt(diagonal(singular_VCoV));
+    return (singular_sigma,diag_post_multiply(diag_pre_multiply(1.0./singular_sigma,singular_VCoV),1.0./singular_sigma));
+  }
+  
 }
 
 data{
@@ -454,6 +469,13 @@ model{
 }
   
 generated quantities {
+  // Return complete singular VCoV as standard deviations and correlation matrix
+  matrix[M, Ar] full_sigma;
+  array[Ar] matrix[M,M] full_Omega;
+  for(ar in 1:Ar){
+      (full_sigma[,ar],full_Omega[ar]) = get_sigma_and_Omega_of_singular_VCoV(Lhat[ar],1);
+  }
+  
   //matrix[A, M] alpha_normalised = alpha;
   
   // // Rondom effect
