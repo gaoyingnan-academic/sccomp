@@ -98,14 +98,11 @@ functions{
       return target_lp;
     }
   
-  tuple(vector,matrix) get_sigma_and_Omega_of_singular_VCoV(matrix VCoV, int is_Cholesky_factor){
+  tuple(vector,matrix) get_sigma_and_Omega_of_singular_VCoV(matrix VCoV){
     int cV = cols(VCoV);
     vector[cV] one_vec = rep_vector(1.0,cV);
     matrix[cV+1,cV+1] singular_VCoV;
     vector[cV+1] singular_sigma;
-    if(is_Cholesky_factor){
-      VCoV = VCoV*VCoV';
-    }
     singular_VCoV[1:cV,1+cV] = -1.0*VCoV*one_vec;
     singular_VCoV[1+cV,1:cV]= to_row_vector(singular_VCoV[1:cV,1+cV]);
     singular_VCoV[1+cV,1+cV] = one_vec'*VCoV*one_vec;
@@ -473,7 +470,7 @@ generated quantities {
   matrix[M, Ar] full_sigma;
   array[Ar] matrix[M,M] full_Omega;
   for(ar in 1:Ar){
-      (full_sigma[,ar],full_Omega[ar]) = get_sigma_and_Omega_of_singular_VCoV(Lhat[ar],1);
+      (full_sigma[,ar],full_Omega[ar]) = get_sigma_and_Omega_of_singular_VCoV(Lhat[ar]*Lhat[ar]');
   }
   
   //matrix[A, M] alpha_normalised = alpha;
