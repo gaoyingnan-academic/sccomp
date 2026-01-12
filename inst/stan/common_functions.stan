@@ -89,6 +89,19 @@
           ncol_X_random_eff
         );
       }
+    
+    array[] int rep_each(array[] int x, int K) {
+      int N = size(x);
+      array[N * K] int y;
+      int pos = 1;
+      for (n in 1:N) {
+        for (k in 1:K) {
+          y[pos] = x[n];
+          pos += 1;
+        }
+      }
+      return y;
+    }
       
   // QR-based sum-to-zero functions removed - now using sum_to_zero_vector[K] type
   

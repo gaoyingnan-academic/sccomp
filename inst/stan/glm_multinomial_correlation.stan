@@ -2,18 +2,6 @@ functions{
  
   #include common_functions.stan
   #include transform_cholesky_factor.stan
-  array[] int rep_each(array[] int x, int K) {
-    int N = size(x);
-    array[N * K] int y;
-    int pos = 1;
-    for (n in 1:N) {
-      for (k in 1:K) {
-        y[pos] = x[n];
-        pos += 1;
-      }
-    }
-    return y;
-  }
   
   real abundance_variability_regression(row_vector variability, row_vector abundance, array[] real prec_coeff, real prec_sd, int bimodal_mean_variability_association, real mix_p){
     
