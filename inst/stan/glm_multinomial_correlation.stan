@@ -33,10 +33,7 @@ functions{
     array[,] int y,
     array[,] real y_proportion,
     
-    // Precision
-    matrix precision,                   // Sliced
-    
-    // Correlation
+    // Variance-Covariance
     array[] matrix Lhat, 
     matrix intermediate_u, // Sliced
     array[] int Xa_to_XA, // Sliced
@@ -75,7 +72,7 @@ functions{
           target_lp += multi_normal_cholesky_lupdf(
             to_vector(y_proportion[idx_y[n],1:(M-1)]) |
             mu[1:(M-1),idx_y[n]],
-            diag_pre_multiply(precision[,idx_y[n]],to_matrix(Lhat[Xa_to_XA[idx_y[n]]]))
+            to_matrix(Lhat[Xa_to_XA[idx_y[n]]])
           );
         }
       }
@@ -103,6 +100,7 @@ functions{
     vector[cV] one_vec = rep_vector(1.0,cV);
     matrix[cV+1,cV+1] singular_VCoV;
     vector[cV+1] singular_sigma;
+    singular_VCoV[1:cV,1:cV] = VCoV;
     singular_VCoV[1:cV,1+cV] = -1.0*VCoV*one_vec;
     singular_VCoV[1+cV,1:cV]= to_row_vector(singular_VCoV[1:cV,1+cV]);
     singular_VCoV[1+cV,1+cV] = one_vec'*VCoV*one_vec;
@@ -117,7 +115,7 @@ data{
   int<lower=1> N; // Equivalent to S in publication
   int<lower=1> M; // Equivalent to G in publication
   int<lower=1> C;
-  int<lower=1> A; // How many column in variability design\
+  int<lower=1> A; // How many column in variability design
   int<lower=1> A_intercept_columns; // How many intercept column in varibility design
   int<lower=1> B_intercept_columns; // How many intercept column in varibility design
   int<lower=1> Ar; // Rows of unique variability design
@@ -244,7 +242,7 @@ parameters{
 transformed parameters{
   // Initialisation
   matrix[C,M] beta;
-  matrix[M-1, N] precision = exp((Xa * alpha)');
+  matrix[M-1, Ar] precision = exp((XA * alpha)');
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
   matrix[A, ((M-2)*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
@@ -254,12 +252,13 @@ transformed parameters{
   }
   matrix[Ar, ((M-2)*(M-1))%/%2] transformed_Lhat = XA * transformed_L;
   
-  // Inverse-transform the vectors back to Cholesky factors
+  // Inverse-transform the vectors back to Cholesky factors then to VCoV
   array[Ar] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
   for(ar in 1:Ar){
     Lhat[ar] = 
       inverse_transform_cholesky_factor_corr(
         to_vector(transformed_Lhat[ar])+adjusted_zero_transformed_L,M-1);
+    Lhat[ar] = diag_pre_multiply(precision[,ar],Lhat[ar]);
   }
   matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
 
@@ -271,7 +270,7 @@ transformed parameters{
   // Non-centered parameterisation for intermediate u
   if(!is_proportion){
       for(n in 1:N){
-        intermediate_u[n,1:(M-1)] = (diag_pre_multiply(precision[,n],Lhat[Xa_to_XA[n]])*to_vector(intermediate_u_raw[n]))';
+        intermediate_u[n,1:(M-1)] = (Lhat[Xa_to_XA[n]]*to_vector(intermediate_u_raw[n]))';
         intermediate_u[n,M] = 0.0 - sum(intermediate_u[n,1:(M-1)]);
         // variance-covariance of the last element is already determined by the previous elements
     }
@@ -358,10 +357,7 @@ model{
       y,
       y_proportion,
       
-      // Precision
-      precision,                   
-      
-      // Correlation
+      // Variance-Covariance
       Lhat, // Only used when is_proportion
       intermediate_u, // Only used when !is_proportion
       Xa_to_XA, // Only used when is_proportion
@@ -468,7 +464,7 @@ model{
     for(m in 1:M) sigma_correlation_factor_2[m] ~ lkj_corr_cholesky(2);   // LKJ prior for the correlation matrix
     }
 }
-  
+
 generated quantities {
   // Return complete singular VCoV as standard deviations and correlation matrix
   matrix[M, Ar] full_sigma;
