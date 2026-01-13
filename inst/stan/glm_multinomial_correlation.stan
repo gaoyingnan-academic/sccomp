@@ -198,6 +198,10 @@ transformed data{
     }
   }
   
+  // For correlation under sum-to-zero-constraint
+  matrix[M-1,M-1] adjusted_zero_L = rep_matrix(-1.0/(M-1),M-1,M-1);
+  adjusted_zero_L = add_diag(adjusted_zero_L,1.0+1.0/(M-1));
+  vector[((M-2)*(M-1))%/%2] adjusted_zero_transformed_L = transform_cholesky_factor_corr(cholesky_decompose(adjusted_zero_L),M-1);
 }
 
 parameters{
@@ -255,7 +259,7 @@ transformed parameters{
   for(ar in 1:Ar){
     Lhat[ar] = 
       inverse_transform_cholesky_factor_corr(
-        to_vector(transformed_Lhat[ar]),M-1);
+        to_vector(transformed_Lhat[ar])+adjusted_zero_transformed_L,M-1);
   }
   matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
 
