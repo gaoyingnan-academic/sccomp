@@ -108,6 +108,13 @@ functions{
     return (singular_sigma,diag_post_multiply(diag_pre_multiply(1.0./singular_sigma,singular_VCoV),1.0./singular_sigma));
   }
   
+  matrix equal_variance_sum_to_zero_Cholesky(int M){
+    matrix[M,M] eqvL = rep_matrix(-1.0,M,M);
+    eqvL = add_diag(eqvL,1.0+M);
+    eqvL = cholesky_decompose(eqvL/M);
+    return eqvL;
+  }
+  
 }
 
 data{
@@ -143,8 +150,8 @@ data{
   array[2] real prior_prec_intercept;
   array[2] real prior_prec_slope;
   array[2] real prior_prec_sd;
-  array[2] real prior_mean_intercept;
-  array[2] real prior_mean_coefficients;
+  array[2] real prior_mean_intercept; // Mean [1] will be ignored
+  array[2] real prior_mean_coefficients; // Mean [1] will be ignored
   
   // Exclude priors for testing purposes
   int<lower=0, upper=1> exclude_priors;
@@ -179,6 +186,10 @@ data{
 }
 
 transformed data{
+  // For prior of beta
+  vector[C] prior_mean_combined = rep_vector(prior_mean_coefficients[2],C);
+  prior_mean_combined[1:B_intercept_columns] = rep_vector(prior_mean_intercept[2],B_intercept_columns);
+  
   // EXCEPTION MADE FOR WINDOWS GENERATE QUANTITIES IF RANDOM EFFECT DO NOT EXIST
   int ncol_X_random_eff_WINDOWS_BUG_FIX = max(ncol_X_random_eff[1], 1);
   int ncol_X_random_eff_WINDOWS_BUG_FIX_2 = max(ncol_X_random_eff[2], 1);
@@ -197,17 +208,18 @@ transformed data{
   }
   
   // For correlation under sum-to-zero-constraint
-  matrix[M-1,M-1] adjusted_zero_L = rep_matrix(-1.0/(M-1),M-1,M-1);
-  adjusted_zero_L = add_diag(adjusted_zero_L,1.0+1.0/(M-1));
-  vector[((M-2)*(M-1))%/%2] adjusted_zero_transformed_L = transform_cholesky_factor_corr(cholesky_decompose(adjusted_zero_L),M-1);
+  cholesky_factor_corr[M-1] adjusted_zero_L = equal_variance_sum_to_zero_Cholesky(M-1);
+  //cholesky_factor_corr[M-2] adjusted_zero_L2 = equal_variance_sum_to_zero_Cholesky(M-2);
+  vector[((M-2)*(M-1))%/%2] adjusted_zero_transformed_L = transform_cholesky_factor_corr(adjusted_zero_L,M-1);
 }
 
 parameters{
-  // Use the new sum_to_zero_vector type instead of QR decomposition
-  array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
+  // Use the MNV transformation instead of sum_to_zero_vector
+  matrix[M-1,C] beta_raw; // Only M-1 degree of freedom
   
-  // Variability is constrained to M-1 dimensions due to the sum-to-zero constraint
-  matrix[A, M-1] alpha; 
+  // Variability is constrained to M-1 dimensions due to the sum-to-zero constraint of beta
+  //vector[A] mean_alpha; // Leave rooms for future development
+  matrix[A, M-1] alpha_raw;
   
   // Correlation is constrained to M-1 dimensions as well
   array[A] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
@@ -240,9 +252,17 @@ parameters{
 }
 
 transformed parameters{
-  // Initialisation
+  // Free normal beta to sum-to-zero normal beta under MVN
   matrix[C,M] beta;
-  matrix[M-1, Ar] precision = exp((XA * alpha)');
+  for(c in 1:C) {
+    //beta[c,] = to_row_vector(beta_raw[c]); //used with sum_to_zero_vector type
+    beta[c,1:(M-1)] = to_row_vector(diag_pre_multiply(rep_vector(prior_mean_combined[c],M-1),adjusted_zero_L)*beta_raw[,c]);
+    beta[c,M] = -sum(beta[c,1:(M-1)]);
+  }
+  
+  // Variance-covariance
+  //vector[Ar] mean_sigma = exp(XA*mean_alpha); // leave rooms for future development
+  matrix[M-1, Ar] sigma = exp((XA*alpha_raw)');
   
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
   matrix[A, ((M-2)*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
@@ -258,20 +278,15 @@ transformed parameters{
     Lhat[ar] = 
       inverse_transform_cholesky_factor_corr(
         to_vector(transformed_Lhat[ar])+adjusted_zero_transformed_L,M-1);
-    Lhat[ar] = diag_pre_multiply(precision[,ar],Lhat[ar]);
-  }
-  matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
-
-  // Convert sum_to_zero_vector to regular matrix
-  for(c in 1:C) {
-    beta[c,] = to_row_vector(beta_raw[c]);
+    Lhat[ar] = diag_pre_multiply(sigma[,ar],Lhat[ar]);
   }
   
   // Non-centered parameterisation for intermediate u
+  matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
   if(!is_proportion){
       for(n in 1:N){
         intermediate_u[n,1:(M-1)] = (Lhat[Xa_to_XA[n]]*to_vector(intermediate_u_raw[n]))';
-        intermediate_u[n,M] = 0.0 - sum(intermediate_u[n,1:(M-1)]);
+        intermediate_u[n,M] = - sum(intermediate_u[n,1:(M-1)]);
         // variance-covariance of the last element is already determined by the previous elements
     }
   }
@@ -341,6 +356,7 @@ transformed parameters{
   }
   
 }
+
 model{
   
   
@@ -385,7 +401,7 @@ model{
     // variability ~ 1
     if(A == 1){
       target += abundance_variability_regression(
-        alpha[1],
+        alpha_raw[1],
         beta[1], // average_by_col(beta[1:B_intercept_columns,]),
         prec_coeff,
         prec_sd,
@@ -397,7 +413,7 @@ model{
       // Loop across the intercept columns in case of a intercept-less design (covariate are intercepts)
       for(a in 1:A_intercept_columns)
       target += abundance_variability_regression(
-        alpha[a],
+        alpha_raw[a],
         beta[a],
         prec_coeff,
         prec_sd,
@@ -406,7 +422,7 @@ model{
         );
         
         // Variability effect if the formula is more complex
-        if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) alpha[a] ~ normal(beta[a] * prec_coeff[2], 2 );
+        if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) alpha_raw[a] ~ normal(beta[a] * prec_coeff[2], 2 );
     }
     
   }
@@ -415,18 +431,20 @@ model{
   else{
     // Priors variability
     if(intercept_in_design || A > 1){
-      for(a in 1:A_intercept_columns) alpha[a]  ~ normal( prec_coeff[1], prec_sd );
-      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) to_vector(alpha[a]) ~ normal ( 0, 2 );
+      for(a in 1:A_intercept_columns) alpha_raw[a]  ~ normal( prec_coeff[1], prec_sd );
+      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) to_vector(alpha_raw[a]) ~ normal ( 0, 2 );
     }
     // if ~ 0 + covariate
     else {
-      alpha[1]  ~ normal( prec_coeff[1], prec_sd );
+      alpha_raw[1]  ~ normal( prec_coeff[1], prec_sd );
     }
   }
   
   // // Priors abundance - use correct scale for sum_to_zero_vector
-  for(c in 1:B_intercept_columns) beta_raw[c] ~ normal ( prior_mean_intercept[1], prior_mean_intercept[2] * inv(sqrt(1 - inv(M))) );
-  if(C>B_intercept_columns) for(c in (B_intercept_columns+1):C) beta_raw[c] ~ normal ( prior_mean_coefficients[1], prior_mean_coefficients[2] * inv(sqrt(1 - inv(M))) );
+  //for(c in 1:B_intercept_columns) beta_raw[c] ~ normal ( prior_mean_intercept[1], prior_mean_intercept[2] * inv(sqrt(1 - inv(M))) );
+  //if(C>B_intercept_columns) for(c in (B_intercept_columns+1):C) beta_raw[c] ~ normal ( prior_mean_coefficients[1], prior_mean_coefficients[2] * inv(sqrt(1 - inv(M))) );
+  // Priors abundance - use mvn in transformed parameters to avoid loop calls of prior
+  to_vector(beta_raw) ~ normal(0,1);
   
   // Hyper priors
   mix_p ~ beta(1,5);
@@ -467,10 +485,21 @@ model{
 
 generated quantities {
   // Return complete singular VCoV as standard deviations and correlation matrix
-  matrix[M, Ar] full_sigma;
-  array[Ar] matrix[M,M] full_Omega;
-  for(ar in 1:Ar){
-      (full_sigma[,ar],full_Omega[ar]) = get_sigma_and_Omega_of_singular_VCoV(Lhat[ar]*Lhat[ar]');
+  if(is_vb){
+      matrix[M, A] full_alpha;
+      array[A] matrix[M,M] full_L;
+      matrix[M, Ar] full_sigma;
+      array[Ar] matrix[M,M] full_Omega;
+      for(a in 1:A){
+          (full_alpha[,a],full_L[a]) = get_sigma_and_Omega_of_singular_VCoV(
+            multiply_lower_tri_self_transpose(diag_pre_multiply(exp(to_vector(alpha_raw[a])),L[a]))
+            );
+      }
+      for(ar in 1:Ar){
+          (full_sigma[,ar],full_Omega[ar]) = get_sigma_and_Omega_of_singular_VCoV(
+            multiply_lower_tri_self_transpose(Lhat[ar])
+            );
+      }
   }
   
   //matrix[A, M] alpha_normalised = alpha;
@@ -499,7 +528,7 @@ generated quantities {
 
     matrix[M, N] mu;
     vector[N*M] mu_array;
-    vector[N*M] precision_array;
+    vector[N*M] sigma_array;
 
     mu = (X * beta)';
 
@@ -515,14 +544,14 @@ generated quantities {
 
     // Convert the matrix m to a column vector in column-major order.
     mu_array = to_vector(mu);
-    precision_array = to_vector(exp(precision));
+    sigma_array = to_vector(exp(sigma));
 
     if(is_proportion)
           for (n in 1:TNS) {
       log_lik[n] = beta_lpdf(
         to_array_1d(y_proportion)[truncation_not_idx[n]] |
-        (mu_array[truncation_not_idx[n]] .* precision_array[truncation_not_idx[n]]),
-        ((1.0 - mu_array[truncation_not_idx[n]]) .* precision_array[truncation_not_idx[n]])
+        (mu_array[truncation_not_idx[n]] .* sigma_array[truncation_not_idx[n]]),
+        ((1.0 - mu_array[truncation_not_idx[n]]) .* sigma_array[truncation_not_idx[n]])
         ) ;
       }
     else
@@ -530,8 +559,8 @@ generated quantities {
        log_lik[n] = beta_binomial_lpmf(
         to_array_1d(y)[truncation_not_idx[n]] |
         rep_each(exposure, M)[truncation_not_idx[n]],
-        (mu_array[truncation_not_idx[n]] .* precision_array[truncation_not_idx[n]]),
-        ((1.0 - mu_array[truncation_not_idx[n]]) .* precision_array[truncation_not_idx[n]])
+        (mu_array[truncation_not_idx[n]] .* sigma_array[truncation_not_idx[n]]),
+        ((1.0 - mu_array[truncation_not_idx[n]]) .* sigma_array[truncation_not_idx[n]])
         ) ;
     }
 
