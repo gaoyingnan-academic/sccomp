@@ -83,12 +83,12 @@ functions{
         for(n in 1:N){
           mu[,n] = softmax(mu[,n]);
         }
-        target_lp += multinomial_lupmf(
+        target_lp += poisson_lupmf(
           to_array_1d(y[idx_y,]) |
-          to_vector(mu)/N
-        ) - multinomial_lupmf(
+          to_vector(diag_post_multiply(mu,to_vector(ysum[idx_y])))
+        ) - poisson_lupmf(
           ysum[idx_y] |
-          rep_vector(1.0/N,N)
+          to_vector(ysum[idx_y])
         );
       }
       return target_lp;
