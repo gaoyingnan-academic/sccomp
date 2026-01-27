@@ -32,6 +32,7 @@ functions{
     int is_proportion,
     array[,] int y,
     array[,] real y_proportion,
+    array[] int ysum, //Sliced
     
     // Variance-Covariance
     array[] matrix Lhat, 
@@ -78,17 +79,15 @@ functions{
       }
       // If input is counts
       else{
-        array[N] int ysum_array; // Pseudo-vectorization
         mu = mu + intermediate_u[idx_y,]';
         for(n in 1:N){
           mu[,n] = softmax(mu[,n]);
-          ysum_array[n] = sum(y[idx_y[n],]);
         }
         target_lp += multinomial_lupmf(
           to_array_1d(y[idx_y,]) |
           to_vector(mu)/N
         ) - multinomial_lupmf(
-          ysum_array |
+          ysum[idx_y] |
           rep_vector(1.0/N,N)
         );
       }
@@ -186,6 +185,12 @@ data{
 }
 
 transformed data{
+  // For multinomial acceleration by pseudo-vectorization
+  array[N * !is_proportion] int ysum; // Supposedly the same as exposure in data block
+  if(!is_proportion){
+    for(n in 1:N) ysum[n] = sum(y[n,]); // But re-calculated here to enforce equivalence to the sum
+  }
+  
   // For prior of beta
   vector[C] prior_mean_combined = rep_vector(prior_mean_coefficients[2],C);
   prior_mean_combined[1:B_intercept_columns] = rep_vector(prior_mean_intercept[2],B_intercept_columns);
@@ -372,6 +377,7 @@ model{
       is_proportion,
       y,
       y_proportion,
+      ysum,
       
       // Variance-Covariance
       Lhat, // Only used when is_proportion
