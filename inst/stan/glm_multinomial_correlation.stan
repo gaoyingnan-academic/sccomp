@@ -492,11 +492,11 @@ model{
 
 generated quantities {
   // Return complete singular VCoV as standard deviations and correlation matrix
+  matrix[M*is_vb, A*is_vb] full_alpha;
+  array[A*is_vb] matrix[M,M] full_L;
+  matrix[M*is_vb, Ar*is_vb] full_sigma;
+  array[Ar*is_vb] matrix[M,M] full_Omega;
   if(is_vb){
-      matrix[M, A] full_alpha;
-      array[A] matrix[M,M] full_L;
-      matrix[M, Ar] full_sigma;
-      array[Ar] matrix[M,M] full_Omega;
       for(a in 1:A){
           (full_alpha[,a],full_L[a]) = get_sigma_and_Omega_of_singular_VCoV(
             multiply_lower_tri_self_transpose(diag_pre_multiply(exp(to_vector(alpha_raw[a])),L[a]))
