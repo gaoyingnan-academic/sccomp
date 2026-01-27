@@ -83,6 +83,7 @@ functions{
         for(n in 1:N){
           mu[,n] = softmax(mu[,n]);
         }
+        // GPU-compatible pseudo-vectorization
         target_lp += poisson_lupmf(
           to_array_1d(y[idx_y,]) |
           to_vector(diag_post_multiply(mu,to_vector(ysum[idx_y])))
