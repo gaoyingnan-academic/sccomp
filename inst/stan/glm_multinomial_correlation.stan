@@ -220,8 +220,10 @@ transformed data{
 }
 
 parameters{
-  // Use the MNV transformation instead of sum_to_zero_vector
-  matrix[M-1,C] beta_raw; // Only M-1 degree of freedom
+  // // Use the MNV transformation instead of sum_to_zero_vector
+  //matrix[M-1,C] beta_raw; // Only M-1 degree of freedom
+  // Use built-in sum-to-zero vector
+  array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
   
   // Variability is constrained to M-1 dimensions due to the sum-to-zero constraint of beta
   //vector[A] mean_alpha; // Leave rooms for future development
@@ -261,9 +263,9 @@ transformed parameters{
   // Free normal beta to sum-to-zero normal beta under MVN
   matrix[C,M] beta;
   for(c in 1:C) {
-    //beta[c,] = to_row_vector(beta_raw[c]); //used with sum_to_zero_vector type
-    beta[c,1:(M-1)] = to_row_vector(diag_pre_multiply(rep_vector(prior_mean_combined[c],M-1),adjusted_zero_L)*beta_raw[,c]);
-    beta[c,M] = -sum(beta[c,1:(M-1)]);
+    beta[c,] = to_row_vector(beta_raw[c]); //used with sum_to_zero_vector type
+    //beta[c,1:(M-1)] = to_row_vector(diag_pre_multiply(rep_vector(prior_mean_combined[c],M-1),adjusted_zero_L)*beta_raw[,c]);
+    //beta[c,M] = -sum(beta[c,1:(M-1)]);
   }
   
   // Variance-covariance
@@ -447,11 +449,11 @@ model{
     }
   }
   
-  // // Priors abundance - use correct scale for sum_to_zero_vector
-  //for(c in 1:B_intercept_columns) beta_raw[c] ~ normal ( prior_mean_intercept[1], prior_mean_intercept[2] * inv(sqrt(1 - inv(M))) );
-  //if(C>B_intercept_columns) for(c in (B_intercept_columns+1):C) beta_raw[c] ~ normal ( prior_mean_coefficients[1], prior_mean_coefficients[2] * inv(sqrt(1 - inv(M))) );
-  // Priors abundance - use mvn in transformed parameters to avoid loop calls of prior
-  to_vector(beta_raw) ~ normal(0,1);
+  // Priors abundance - use correct scale for sum_to_zero_vector
+  for(c in 1:B_intercept_columns) beta_raw[c] ~ normal ( prior_mean_intercept[1], prior_mean_intercept[2] * inv(sqrt(1 - inv(M))) );
+  if(C>B_intercept_columns) for(c in (B_intercept_columns+1):C) beta_raw[c] ~ normal ( prior_mean_coefficients[1], prior_mean_coefficients[2] * inv(sqrt(1 - inv(M))) );
+  // // Priors abundance - use mvn in transformed parameters to avoid loop calls of prior
+  //to_vector(beta_raw) ~ normal(0,1);
   
   // Hyper priors
   mix_p ~ beta(1,5);
