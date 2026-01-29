@@ -453,7 +453,7 @@ model{
   for(c in 1:B_intercept_columns) beta_raw[c] ~ normal ( prior_mean_intercept[1], prior_mean_intercept[2] * inv(sqrt(1 - inv(M))) );
   if(C>B_intercept_columns) for(c in (B_intercept_columns+1):C) beta_raw[c] ~ normal ( prior_mean_coefficients[1], prior_mean_coefficients[2] * inv(sqrt(1 - inv(M))) );
   // // Priors abundance - use mvn in transformed parameters to avoid loop calls of prior
-  //to_vector(beta_raw) ~ normal(0,1);
+  //to_vector(beta_raw) ~ std_normal();
   
   // Hyper priors
   mix_p ~ beta(1,5);
