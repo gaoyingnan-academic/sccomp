@@ -101,7 +101,7 @@ functions{
     matrix[cV+1,cV+1] singular_VCoV;
     vector[cV+1] singular_sigma;
     singular_VCoV[1:cV,1:cV] = VCoV;
-    singular_VCoV[1:cV,1+cV] = -1.0*VCoV*one_vec;
+    singular_VCoV[1:cV,1+cV] = -VCoV*one_vec;
     singular_VCoV[1+cV,1:cV]= to_row_vector(singular_VCoV[1:cV,1+cV]);
     singular_VCoV[1+cV,1+cV] = one_vec'*VCoV*one_vec;
     singular_sigma = sqrt(diagonal(singular_VCoV));
@@ -113,6 +113,22 @@ functions{
     eqvL = add_diag(eqvL,1.0+M);
     eqvL = cholesky_decompose(eqvL/M);
     return eqvL;
+  }
+  
+  matrix inv_equal_variance_sum_to_zero_VCoV(int M, int no_scale){
+    matrix[M,M] eqvL = rep_matrix(1.0,M,M);
+    eqvL = add_diag(eqvL,1.0);
+    if(no_scale) return eqvL;
+    eqvL = (M*eqvL)/(M+1);
+    return eqvL;
+  }
+  
+  real get_constrained_alpha(vector alpha, matrix corr, matrix inv_S_ns){
+    int M = cols(corr);
+    matrix[M,M] VCoV = diag_post_multiply(diag_pre_multiply(exp(alpha),corr),exp(alpha));
+    VCoV = inv_S_ns*VCoV;
+    real alpha_constrained = log(sum(diagonal(VCoV))-sum(exp(2*alpha)))/2;
+    return alpha_constrained;
   }
   
 }
@@ -215,7 +231,7 @@ transformed data{
   
   // For correlation under sum-to-zero-constraint
   cholesky_factor_corr[M-1] adjusted_zero_L = equal_variance_sum_to_zero_Cholesky(M-1);
-  //cholesky_factor_corr[M-2] adjusted_zero_L2 = equal_variance_sum_to_zero_Cholesky(M-2);
+  matrix[M-1,M-1] inv_S_ns = inv_equal_variance_sum_to_zero_VCoV(M-1,1);
   vector[((M-2)*(M-1))%/%2] adjusted_zero_transformed_L = transform_cholesky_factor_corr(adjusted_zero_L,M-1);
 }
 
@@ -226,11 +242,13 @@ parameters{
   array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
   
   // Variability is constrained to M-1 dimensions due to the sum-to-zero constraint of beta
-  //vector[A] mean_alpha; // Leave rooms for future development
+  // vector[A] mean_alpha; // Hyper-prior for Wishart distribution or a separate design layer
   matrix[A, M-1] alpha_raw;
   
   // Correlation is constrained to M-1 dimensions as well
-  array[A] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
+  //array[A] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
+  array[A] corr_matrix[M-1] L; // Sample LKJ directly to avoid Jackobian matrix
+  //array[A] cov_matrix[M-1] L; // use Wishart distribution
   matrix[N * !is_proportion, M-1] intermediate_u_raw; // independent components of correlated residuals to bridge proportions and read counts
   
   // To exclude
@@ -269,23 +287,30 @@ transformed parameters{
   }
   
   // Variance-covariance
-  //vector[Ar] mean_sigma = exp(XA*mean_alpha); // leave rooms for future development
-  matrix[M-1, Ar] sigma = exp((XA*alpha_raw)');
-  
+  matrix[A, M] alpha;
+  // Some code to catch mean-variability association
   // Transform Cholesky factors to vectors so they can multiply with the design matrix
   matrix[A, ((M-2)*(M-1))%/%2] transformed_L; // For unconstrained operations on Cholesky factors
   for(a in 1:A){
+    alpha[a,1:(M-1)] = alpha_raw[a];
+    alpha[a,M] = get_constrained_alpha(to_vector(alpha_raw[a]), L[a], inv_S_ns); // For prior evaluation only
     transformed_L[a] = 
-      to_row_vector(transform_cholesky_factor_corr(L[a],M-1));
+      //to_row_vector(transform_cholesky_factor_corr(L[a],M-1));
+      to_row_vector(transform_cholesky_factor_corr(cholesky_decompose(L[a]),M-1));
   }
+  
+  // Apply design to get sample-specific parameters
+  //vector[Ar] mean_sigma = exp(XA*mean_alpha); // leave rooms for future development
+  matrix[M-1, Ar] sigma = exp((XA*alpha_raw)');
   matrix[Ar, ((M-2)*(M-1))%/%2] transformed_Lhat = XA * transformed_L;
   
-  // Inverse-transform the vectors back to Cholesky factors then to VCoV
+  // Inverse-transform the vectors back to Cholesky factors of correlation then to VCoV
   array[Ar] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
   for(ar in 1:Ar){
     Lhat[ar] = 
       inverse_transform_cholesky_factor_corr(
-        to_vector(transformed_Lhat[ar])+adjusted_zero_transformed_L,M-1);
+        //to_vector(transformed_Lhat[ar])+adjusted_zero_transformed_L,M-1);
+        to_vector(transformed_Lhat[ar]),M-1);
     Lhat[ar] = diag_pre_multiply(sigma[,ar],Lhat[ar]);
   }
   
@@ -309,7 +334,6 @@ transformed parameters{
   if(ncol_X_random_eff[2]> 0) for(m in 1:(M)) random_effect_sigma_2[m] = random_effect_sigma_mu[2] + random_effect_sigma_sigma[2] * random_effect_sigma_raw_2[m];
   if(ncol_X_random_eff[2]> 0) for(m in 1:(M)) random_effect_sigma_2[m] = exp(random_effect_sigma_2[m]/3.0);
     
-  
   matrix[ncol_X_random_eff[1] * (is_random_effect>0), M] random_effect;
   matrix[ncol_X_random_eff[2] * (is_random_effect>0), M] random_effect_2;
   
@@ -366,7 +390,6 @@ transformed parameters{
 }
 
 model{
-  
   
   // Fit main distribution
   if(use_data == 1){
@@ -440,12 +463,12 @@ model{
   else{
     // Priors variability
     if(intercept_in_design || A > 1){
-      for(a in 1:A_intercept_columns) alpha_raw[a]  ~ normal( prec_coeff[1], prec_sd );
-      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) to_vector(alpha_raw[a]) ~ normal ( 0, 2 );
+      for(a in 1:A_intercept_columns) target += (M-1)*normal_lupdf(to_vector(alpha[a]) | prec_coeff[1], prec_sd)/M;
+      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) target += (M-1)*normal_lupdf(to_vector(alpha[a]) | 0.0, 2.0)/M;
     }
     // if ~ 0 + covariate
     else {
-      alpha_raw[1]  ~ normal( prec_coeff[1], prec_sd );
+      target += (M-1)*normal_lupdf(to_vector(alpha[1]) | prec_coeff[1], prec_sd)/M;
     }
   }
   
@@ -460,13 +483,18 @@ model{
   prec_coeff[1] ~ normal(prior_prec_intercept[1], prior_prec_intercept[2]);
   prec_coeff[2] ~ normal(prior_prec_slope[1],prior_prec_slope[2]);
   prec_sd ~ gamma(prior_prec_sd[1],prior_prec_sd[2]);
-  prec_coeff ~ std_normal();
+  // prec_coeff ~ std_normal(); // Perphaps not commented out properly?
   // Note: sum_to_zero_vector has built-in priors, no need for explicit std_normal()
   
   // (Hyper-)priors for the correlation matrices
   for(a in 1:A){
-      L[a] ~ lkj_corr_cholesky(2);
+      //L[a] ~ lkj_corr_cholesky(2.0); //Use when Cholesky factor space is sampled
+      // Sample correlation matrix directly and adjust for the constrained group
+      // Replace 2.0 with a user-supplied value in the future
+      target += lkj_corr_lupdf(L[a] | 2.0) + 
+        (2.0-1)*(2*sum(alpha[a,1:(M-1)]) - M*2*alpha[a,M])/M;
   }
+  
   // Priors for intermediate_u, only matters when using count data
   if(!is_proportion){
     to_vector(intermediate_u_raw) ~ std_normal();
