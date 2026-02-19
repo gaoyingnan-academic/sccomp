@@ -135,6 +135,7 @@ data{
   array[2] real prior_prec_sd;
   array[2] real prior_mean_intercept;
   array[2] real prior_mean_coefficients;
+  real<lower=0> prior_corr_eta; 
   
   // Exclude priors for testing purposes
   int<lower=0, upper=1> exclude_priors;
@@ -210,7 +211,7 @@ parameters{
   array[A] cholesky_factor_corr[M-1] L; // Cholesky factor for correlation matrices
   
   // raw ILR latent residuals
-  matrix[N * !is_proportion, M-1] intermediate_u_raw;
+  matrix[N * use_data, (M-1) * !is_proportion] intermediate_u_raw;
   
   // To exclude
   array[2] real prec_coeff;
@@ -259,8 +260,8 @@ transformed parameters{
   }
   
   // Non-centered parameterisation for ILR intermediate u
-  matrix[N * !is_proportion, M-1] intermediate_u; // ILR
-  if(!is_proportion){
+  matrix[N * use_data , (M-1) * !is_proportion] intermediate_u; // ILR
+  if(use_data&&(!is_proportion)){
       for(n in 1:N){
         intermediate_u[n] = to_row_vector(Lhat[Xa_to_XA[n]]*to_vector(intermediate_u_raw[n]));
     }
@@ -434,11 +435,11 @@ model{
   
   // (Hyper-)priors for the correlation matrices
   for(a in 1:A){
-      L[a] ~ lkj_corr_cholesky(2);
+      L[a] ~ lkj_corr_cholesky(prior_corr_eta);
   }
   // Priors for intermediate_u, only matters when using count data
-  if(!is_proportion){
-    to_vector(intermediate_u_raw) ~ normal(0.0, 1.0);
+  if(use_data&&(!is_proportion)){
+    to_vector(intermediate_u_raw) ~ std_normal();
   }
 
   // Random intercept
