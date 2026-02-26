@@ -393,7 +393,7 @@ model{
       for(a in 1:A_intercept_columns)
       target += abundance_variability_regression(
         alpha_raw[a],
-        beta_raw[a],
+        to_row_vector(beta_raw[,a]),
         prec_coeff,
         prec_sd,
         bimodal_mean_variability_association,
@@ -401,7 +401,7 @@ model{
         );
         
         // Variability effect if the formula is more complex
-        if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) alpha_raw[a] ~ normal(beta_raw[a] * prec_coeff[2], 2 );
+        if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) alpha_raw[a] ~ normal(beta_raw[,a] * prec_coeff[2], 2 );
     }
     
   }
