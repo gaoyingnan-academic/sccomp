@@ -25,7 +25,7 @@ functions{
     array[] int ysum, //Sliced
     
     // Variance-Covariance
-    array[] matrix Lhat, 
+    array[] matrix XSigma, 
     matrix intermediate_u, // Sliced
     array[] int Xa_to_XA, // Sliced
     
@@ -63,7 +63,7 @@ functions{
           target_lp += multi_normal_cholesky_lupdf(
             to_vector(y_proportion[idx_y[n],1:(M-1)]) |
             mu[1:(M-1),idx_y[n]],
-            to_matrix(Lhat[Xa_to_XA[idx_y[n]]])
+            to_matrix(XSigma[Xa_to_XA[idx_y[n]]])
           );
         }
       }
@@ -318,11 +318,9 @@ transformed parameters{
 }
 
 model{
-  
   // Fit main distribution
   if(use_data == 1){
-    
-   target += reduce_sum(
+    target += reduce_sum(
       partial_sum_2_lupmf,
       array_N,
       grainsize,
@@ -349,7 +347,7 @@ model{
       X_random_effect_2, 
       random_effect,
       random_effect_2
-      );
+    );
   }
   
   // Priors
@@ -371,18 +369,14 @@ model{
   }
   // When there is no mean-variability association, use the equal-correlation S_0 as S
   else{
-    print(prec_coeff)
-    print(prec_sd)
     // Priors variability
     if(intercept_in_design || A > 1){
       for(a in 1:A_intercept_columns){
-        print(wishart_lupdf(Sigma_raw[a]|prec_sd + nu_lower, exp(2*prec_coeff[1])*S_0));
         Sigma_raw[a] ~ wishart(prec_sd + nu_lower, exp(2*prec_coeff[1])*S_0);
       }
       if(A>A_intercept_columns){
         for(a in (A_intercept_columns+1):A){
-          print(wishart_lupdf(Sigma_raw[a]|prec_sd + nu_lower, S_0));
-          Sigma_raw[a] ~ wishart(perc_sd + nu_lower,S_0);
+          Sigma_raw[a] ~ wishart(prec_sd + nu_lower,S_0);
         }
       }
     }
