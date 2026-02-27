@@ -381,7 +381,7 @@ model{
     if(A == 1){
       target += abundance_variability_regression(
         alpha_raw[1],
-        beta_raw[1], // average_by_col(beta[1:B_intercept_columns,]),
+        to_row_vector(beta_raw[,1]),
         prec_coeff,
         prec_sd,
         bimodal_mean_variability_association,
