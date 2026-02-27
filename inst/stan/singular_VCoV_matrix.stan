@@ -30,3 +30,11 @@
     eqvL = (M*eqvL)/(M+1);
     return eqvL;
   }
+
+  // I-J matrix as the product of canonical Helmert matrix
+  matrix I_minus_J_matrix(int M){
+    matrix[M,M] IJ = rep_matrix(-1.0/M,M,M);
+    IJ = add_diag(IJ,1.0);
+    return IJ;
+  }
+  
