@@ -1,7 +1,8 @@
 functions{
  
   #include common_functions.stan
-  #include matrix_exponential_and_logarithm.stan
+  //#include matrix_exponential_and_logarithm.stan
+  #include transform_cholesky_factor.stan
   #include singular_VCoV_matrix.stan
   
   // No bimodality for Wishart-based mean-variability association
@@ -84,7 +85,7 @@ functions{
       }
       return target_lp;
     }
-  
+
 }
 
 data{
@@ -358,12 +359,12 @@ model{
     // variability ~ 1
     if(intercept_in_design || A > 1){
       // Loop across the intercept columns in case of a intercept-less design (covariate are intercepts)
-      for(a in 1:A_intercept_columns) Sigma_raw[a] ~ wishart(prec_sd + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,1));
+      for(a in 1:A_intercept_columns) Sigma_raw[a] ~ wishart(2 + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,1));
       // Variability effect if the formula is more complex
-      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) Sigma_raw[a] ~ wishart(prec_sd + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,0));
+      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) Sigma_raw[a] ~ wishart(2 + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,0));
     }
     else {
-      Sigma_raw[1] ~ wishart(prec_sd + nu_lower, abundance_variability_regression(beta[1],prec_coeff,I_J,0));
+      Sigma_raw[1] ~ wishart(2 + nu_lower, abundance_variability_regression(beta[1],prec_coeff,I_J,0));
     }
     
   }
@@ -372,17 +373,17 @@ model{
     // Priors variability
     if(intercept_in_design || A > 1){
       for(a in 1:A_intercept_columns){
-        Sigma_raw[a] ~ wishart(prec_sd + nu_lower, exp(2*prec_coeff[1])*S_0);
+        Sigma_raw[a] ~ wishart(2 + nu_lower, exp(2*prec_coeff[1])*S_0);
       }
       if(A>A_intercept_columns){
         for(a in (A_intercept_columns+1):A){
-          Sigma_raw[a] ~ wishart(prec_sd + nu_lower,S_0);
+          Sigma_raw[a] ~ wishart(2 + nu_lower,S_0);
         }
       }
     }
     // if ~ 0 + covariate
     else {
-      Sigma_raw[1] ~ wishart(prec_sd + nu_lower, S_0);
+      Sigma_raw[1] ~ wishart(2 + nu_lower, S_0);
     }
   }
   

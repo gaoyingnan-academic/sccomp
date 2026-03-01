@@ -32,3 +32,27 @@
     }
     return 0.5*(log(1+y)-log(1-y));// tanh^-1 or arctanh
   }
+  
+  
+  vector transform_cholesky_factor_cov(matrix L_Sigma){
+    int M = cols(L_Sigma);
+    vector[M] sigma = sqrt(diagonal(multiply_lower_tri_self_transpose(L_Sigma)));
+    matrix[M,M] L_R = diag_pre_multiply((inv(sigma)),L_Sigma);
+    vector[(M*(M+1))%/%2] vectorized_L_Sigma;
+    vectorized_L_Sigma[1:M] = log(sigma);
+    vectorized_L_Sigma[(1+M):((M*(M+1))%/%2)] = transform_cholesky_factor_corr(L_R, M);
+    return vectorized_L_Sigma;
+  }
+  
+  /*
+  tuple(vector,matrix) inverse_transform_cholesky_factor_cov(vector vec_L_Sigma){
+    int M = to_int(sqrt(2*num_elements(vec_L_Sigma)));
+    vector[M] sigma = sqrt(diagonal(multiply_lower_tri_self_transpose(L_Sigma)));
+    matrix[M,M] L_R = diag_pre_multiply((inv(sigma)),L_Sigma);
+    vector[(M*(M+1))%/%2] vectorized_L_Sigma;
+    vectorized_L_Sigma[1:M] = log(sigma);
+    vectorized_L_Sigma[(1+M):((M*(M+1))%/%2)] = transform_cholesky_factor_corr(L_R, M);
+    return vectorized_L_Sigma;
+  }
+  */
+  
