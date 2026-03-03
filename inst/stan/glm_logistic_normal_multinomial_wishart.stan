@@ -1,7 +1,6 @@
 functions{
  
   #include common_functions.stan
-  //#include matrix_exponential_and_logarithm.stan
   #include transform_cholesky_factor.stan
   #include singular_VCoV_matrix.stan
   
@@ -10,7 +9,7 @@ functions{
     int M = num_elements(abundance);
     vector[M] variability =  abundance' * prec_coeff[2] + use_intercept*prec_coeff[1]; // as log-std
     matrix[M,M] S = I_J*diag_matrix(M*exp(2*variability)/(M-1))*I_J;
-    return S[1:(M-1),1:(M-1)];
+    return cholesky_decompose(S[1:(M-1),1:(M-1)]);
   }
       
   real partial_sum_2_lpmf(
@@ -185,7 +184,8 @@ transformed data{
   }
   
   // Internal constants
-  matrix[M-1,M-1] S_0 = equal_variance_sum_to_zero_VCoV(M-1,0);
+  cholesky_factor_cov[M-1,M-1] S_0 = cholesky_decompose(equal_variance_sum_to_zero_VCoV(M-1,0));
+  vector[(M*(M-1))%/%2] vec_S_0 = transform_cholesky_factor_cov(S_0);
   matrix[M,M] I_J = I_minus_J_matrix(M);
   real nu_lower = M+1; // enforce Wishart distribution to be unimodal with location S and precision nu
 }
@@ -195,7 +195,8 @@ parameters{
   array[C] sum_to_zero_vector[M] beta_raw; // Each row is a sum_to_zero_vector of length M
   
   // Covariance matrix is singular so we only declare the full-rank [M-1] part
-  array[A] cov_matrix[M-1] Sigma_raw;
+  //array[A] cov_matrix[M-1] Sigma_raw;
+  array[A] cholesky_factor_cov[M-1] Sigma_raw;
   
   // full-rank part of residuals to bridge proportions and read counts
   matrix[N * !is_proportion, M-1] intermediate_u_raw; 
@@ -233,15 +234,20 @@ transformed parameters{
   }
   
   // Vectorized logarithm of variance-covariance matrix
-  matrix[A, (M-1)*(M-1)] log_Sigma_raw;
-  for(a in 1:A) log_Sigma_raw[a] = to_row_vector(vectorized_matrix_log_spd(Sigma_raw[a]));
+  //matrix[A, (M-1)*(M-1)] log_Sigma_raw;
+  matrix[A, (M*(M-1))%/%2] log_Sigma_raw;
+  
+  //for(a in 1:A) log_Sigma_raw[a] = to_row_vector(vectorized_matrix_log_spd(Sigma_raw[a]));
+  for(a in 1:A) log_Sigma_raw[a] = to_row_vector(transform_cholesky_factor_cov(Sigma_raw[a])-vec_S_0);
   
   // Apply linear design to get unique sample-specific log VCoV
-  matrix[Ar, (M-1)*(M-1)] X_log_Sigma_raw = XA * log_Sigma_raw;
+  //matrix[Ar, (M-1)*(M-1)] X_log_Sigma_raw = XA * log_Sigma_raw;
+  matrix[Ar, (M*(M-1))%/%2] X_log_Sigma_raw = XA * log_Sigma_raw;
   
   // Take matrix exponential to get SPD VCoV back
   array[Ar] cholesky_factor_cov[M-1] L_X_Sigma_raw;
-  for(ar in 1:Ar) L_X_Sigma_raw[ar] = unvectorized_matrix_exp_spd(to_vector(X_log_Sigma_raw[ar]));
+  //for(ar in 1:Ar) L_X_Sigma_raw[ar] = unvectorized_matrix_exp_spd(to_vector(X_log_Sigma_raw[ar]));
+  for(ar in 1:Ar) L_X_Sigma_raw[ar] = inverse_transform_cholesky_factor_cov(to_vector(X_log_Sigma_raw[ar])+vec_S_0);
   
   // Non-centered parameterisation for intermediate u from Cholesky factors L_X_Sigma_raw
   matrix[N * !is_proportion, M] intermediate_u; // The actual residuals have dimension M
@@ -359,12 +365,12 @@ model{
     // variability ~ 1
     if(intercept_in_design || A > 1){
       // Loop across the intercept columns in case of a intercept-less design (covariate are intercepts)
-      for(a in 1:A_intercept_columns) Sigma_raw[a] ~ wishart(2 + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,1));
+      for(a in 1:A_intercept_columns) Sigma_raw[a] ~ wishart_cholesky(prior_corr_eta + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,1));
       // Variability effect if the formula is more complex
-      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) Sigma_raw[a] ~ wishart(2 + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,0));
+      if(A>A_intercept_columns) for(a in (A_intercept_columns+1):A) Sigma_raw[a] ~ wishart_cholesky(prior_corr_eta + nu_lower, abundance_variability_regression(beta[a],prec_coeff,I_J,0));
     }
     else {
-      Sigma_raw[1] ~ wishart(2 + nu_lower, abundance_variability_regression(beta[1],prec_coeff,I_J,0));
+      Sigma_raw[1] ~ wishart_cholesky(prior_corr_eta + nu_lower, abundance_variability_regression(beta[1],prec_coeff,I_J,0));
     }
     
   }
@@ -373,17 +379,17 @@ model{
     // Priors variability
     if(intercept_in_design || A > 1){
       for(a in 1:A_intercept_columns){
-        Sigma_raw[a] ~ wishart(2 + nu_lower, exp(2*prec_coeff[1])*S_0);
+        Sigma_raw[a] ~ wishart_cholesky(prior_corr_eta + nu_lower, exp(prec_coeff[1])*S_0);
       }
       if(A>A_intercept_columns){
         for(a in (A_intercept_columns+1):A){
-          Sigma_raw[a] ~ wishart(2 + nu_lower,S_0);
+          Sigma_raw[a] ~ wishart_cholesky(prior_corr_eta + nu_lower,S_0);
         }
       }
     }
     // if ~ 0 + covariate
     else {
-      Sigma_raw[1] ~ wishart(2 + nu_lower, S_0);
+      Sigma_raw[1] ~ wishart_cholesky(prior_corr_eta + nu_lower, S_0);
     }
   }
   
@@ -429,12 +435,12 @@ generated quantities {
   array[Ar*is_vb] matrix[M,M] XSigma;
   if(is_vb){
       for(a in 1:A){
-          Sigma[a] = quad_form(Sigma_raw[a],sum_to_zero_VCoV_transform_matrix(M-1));
-          sigma_as_sd[,a] = diagonal(Sigma[a]);
+          Sigma[a] = quad_form(multiply_lower_tri_self_transpose(Sigma_raw[a]),sum_to_zero_VCoV_transform_matrix(M-1));
+          sigma_as_sd[,a] = sqrt(diagonal(Sigma[a]));
       }
       for(ar in 1:Ar){
-          Sigma[ar] = quad_form(multiply_lower_tri_self_transpose(L_X_Sigma_raw[ar]),sum_to_zero_VCoV_transform_matrix(M-1));
-          Xsigma_as_sd[,ar] = diagonal(XSigma[ar]);
+          XSigma[ar] = quad_form(multiply_lower_tri_self_transpose(L_X_Sigma_raw[ar]),sum_to_zero_VCoV_transform_matrix(M-1));
+          Xsigma_as_sd[,ar] = sqrt(diagonal(XSigma[ar]));
       }
   }
   
