@@ -168,11 +168,13 @@ data{
   int<lower=0, upper=1> enable_loo;
   
   // External constants
-  matrix[M,M-1] Helmert;
   
 }
 
 transformed data{
+  // Internal constants
+  matrix[M,M-1] Helmert = canonical_Helmert(M);
+  
   // centered and isometric log-ratio transformed data (only relevant for proportional input)
   matrix<lower=0, upper=1>[N * is_proportion,M] clr_y_proportion;
   matrix<lower=0, upper=1>[N * is_proportion,M-1] ilr_y_proportion;
@@ -197,7 +199,7 @@ transformed data{
   // For CPU parallelisation
   array[N] int array_N;
   for(n in 1:N) array_N[n] = n;
-
+  
 }
 
 parameters{
@@ -465,30 +467,33 @@ model{
 
 generated quantities {
   // ILR means to CLR means for interpretability
-  matrix[C,M] beta = (Helmert*beta_raw)';
+  matrix[C,M] beta_CLR = (Helmert*beta_raw)';
 
   // Return complete singular VCoV as standard deviations and correlation matrix
-  matrix[M*is_vb, A*is_vb] full_alpha;
-  array[A*is_vb] matrix[M,M] full_L;
-  matrix[M*is_vb, Ar*is_vb] full_sigma;
-  array[Ar*is_vb] matrix[M,M] full_Omega;
+  matrix[M*is_vb, A*is_vb] sigma_CLR;
+  matrix[M*is_vb, A*is_vb] alpha_CLR;
+  array[A*is_vb] matrix[M,M] R_CLR;
+  matrix[M*is_vb, Ar*is_vb] Xsigma_CLR;
+  matrix[M*is_vb, Ar*is_vb] Xalpha_CLR;
+  array[Ar*is_vb] matrix[M,M] XR_CLR;
   if(is_vb){
       for(a in 1:A){
-          (full_alpha[,a],full_L[a]) = get_std_and_corr_of_VCoV(
+          (sigma_CLR[,a],R_CLR[a]) = get_std_and_corr_of_VCoV(
             Helmert*multiply_lower_tri_self_transpose(
               diag_pre_multiply(exp(to_vector(alpha_raw[a])),L[a])
               )*Helmert'
             );
       }
+      alpha_CLR = log(sigma_CLR);
       for(ar in 1:Ar){
-          (full_sigma[,ar],full_Omega[ar]) = get_std_and_corr_of_VCoV(
+          (Xsigma_CLR[,ar],XR_CLR[ar]) = get_std_and_corr_of_VCoV(
             Helmert*multiply_lower_tri_self_transpose(Lhat[ar])*Helmert'
             );
       }
+      Xalpha_CLR = log(Xsigma_CLR);
   }
   
   //matrix[A, M] alpha_normalised = alpha;
-  
   // // Rondom effect
   // matrix[ncol_X_random_eff_WINDOWS_BUG_FIX, M] beta_random_effect;
   // matrix[ncol_X_random_eff_WINDOWS_BUG_FIX_2, M] beta_random_effect_2;
