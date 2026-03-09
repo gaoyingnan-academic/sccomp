@@ -243,12 +243,12 @@ parameters{
 
 transformed parameters{
   // ILR variance-covariance matrix
-  matrix[A, (M*(M-1))%/%2] transformed_L; // For linear operations on log(VCoV)
+  matrix[A, (M-1)*(M-1)] transformed_L; // For linear operations on log(VCoV)
   for(a in 1:A){
     transformed_L[a] = 
       to_row_vector(vectorized_matrix_log_spd(multiply_lower_tri_self_transpose(diag_pre_multiply(exp(alpha_raw[a]),L[a]))));
   }
-  matrix[Ar, (M*(M-1))%/%2] transformed_Lhat = XA * transformed_L; //Design-specific Cholesky factors
+  matrix[Ar, (M-1)*(M-1)] transformed_Lhat = XA * transformed_L; //Design-specific Cholesky factors
   
   // Inverse-transform the vectors back to Cholesky factors (ILR)
   array[Ar] matrix[M-1,M-1] Lhat; // inverse-transformed from unconstrained values
