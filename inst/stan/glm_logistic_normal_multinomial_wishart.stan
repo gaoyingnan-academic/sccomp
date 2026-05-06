@@ -197,6 +197,7 @@ parameters{
   // Covariance matrix is singular so we only declare the full-rank [M-1] part
   //array[A] cov_matrix[M-1] Sigma_raw;
   array[A] cholesky_factor_cov[M-1] Sigma_raw;
+  matrix[A,M-1] hyperprior_alpha; // to allow more variability among variances
   
   // full-rank part of residuals to bridge proportions and read counts
   matrix[N * !is_proportion, M-1] intermediate_u_raw; 
@@ -379,7 +380,7 @@ model{
     // Priors variability
     if(intercept_in_design || A > 1){
       for(a in 1:A_intercept_columns){
-        Sigma_raw[a] ~ wishart_cholesky(prior_corr_eta + nu_lower, exp(prec_coeff[1])*S_0);
+        Sigma_raw[a] ~ wishart_cholesky(prior_corr_eta + nu_lower, S_0);
       }
       if(A>A_intercept_columns){
         for(a in (A_intercept_columns+1):A){
