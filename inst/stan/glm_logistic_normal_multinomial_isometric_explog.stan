@@ -176,8 +176,8 @@ transformed data{
   matrix[M,M-1] Helmert = canonical_Helmert(M);
   
   // centered and isometric log-ratio transformed data (only relevant for proportional input)
-  matrix<lower=0, upper=1>[N * is_proportion,M] clr_y_proportion;
-  matrix<lower=0, upper=1>[N * is_proportion,M-1] ilr_y_proportion;
+  matrix[N * is_proportion,M] clr_y_proportion;
+  matrix[N * is_proportion,M-1] ilr_y_proportion;
   
   // For multinomial acceleration by pseudo-vectorization
   array[N * !is_proportion] int ysum; // Supposedly the same as exposure in data block
