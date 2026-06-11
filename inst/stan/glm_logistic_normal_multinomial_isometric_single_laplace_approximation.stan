@@ -15,10 +15,6 @@ functions{
   ) {
     real lp = 0;
     vector[M] mu = Helmert*(beta+u);
-    //lp += multi_normal_cholesky_lpdf(
-    //  u | rep_vector(0,M-1), L
-    //);
-
     lp += multinomial_logit_lpmf(
       y | mu
     );
@@ -52,7 +48,10 @@ functions{
     int M, 
     
     // Helmert matrix
-    matrix Helmert
+    matrix Helmert,
+    
+    // Laplace approximation options
+    data tuple(vector, real, int, int, int, int) laplace_ops
     ){
       
       int N = end-start+1; // Number of observations subsetted to this chunk
@@ -76,12 +75,13 @@ functions{
       // If input is counts
       else{
         for(n in 1:N){
-          target_lp += laplace_marginal(
+          target_lp += laplace_marginal_tol(
             ll_function, //custom log-likelihood function with latent residuals
             (M,to_array_1d(y[idx_y[n],]),ysum[idx_y[n]],L[1],mu[,n],Helmert), //parameters without latent residuals
             M-1, // Hessian block size
             cov_function, //covariance function for latent residuals
-            (to_matrix(L[1]),M) // cov_function just converts it to VCoV
+            (to_matrix(L[1]),M), // cov_function just converts it to VCoV
+            laplace_ops // options for laplace approximation
             );
         }
       }
@@ -112,6 +112,11 @@ data{
   // Parallel chain
   int<lower=1> grainsize;
   
+  // options for Laplace approximation
+  real<lower=0> laplace_tol; // tolerance for optimizer
+  int<lower=0> laplace_max_iter; // maximum number of steps for optimizer
+  int<lower=1, upper=3> laplace_solver; // Newton solver type being used
+  
   // External constants
   
 }
@@ -140,6 +145,12 @@ transformed data{
   // For CPU parallelisation
   array[N] int array_N;
   for(n in 1:N) array_N[n] = n;
+  
+  // For Laplace approximation
+  tuple(vector[M-1], real, int, int, int, int) laplace_ops = generate_laplace_options(M-1);
+  laplace_ops.2 = laplace_tol;      // tolerance for optimizer
+  laplace_ops.3 = laplace_max_iter; // maximum number of steps for optimizer
+  laplace_ops.4 = laplace_solver;   // solver type being used
   
 }
 
@@ -191,7 +202,10 @@ model{
       M, 
       
       // Helmert matrix
-      Helmert
+      Helmert,
+      
+      // Laplace approximation options
+      laplace_ops
       );
   }
   alpha_raw[1]  ~ std_normal();
