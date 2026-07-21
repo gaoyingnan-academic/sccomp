@@ -1,8 +1,7 @@
 functions{
 
   #include singular_VCoV_matrix.stan
-  #include transform_cholesky_factor.stan
-  
+
   // likelihood of data given latent residual + parameters:
   real ll_function(
       vector u, // latent ILR residuals
@@ -224,7 +223,7 @@ transformed parameters{
     alpha_raw[1:C_intercept_columns,] * H_alpha' * prior_sd_norm_sd[1];
   // transformed Cholesky factors
   matrix[C, Cholesky_df] tL;
-  for(c in 1:C) tL[c,] = to_row_vector(transform_cholesky_factor_corr(L[c],M-1));
+  for(c in 1:C) tL[c,] = to_row_vector(cholesky_factor_corr_unconstrain(L[c]));
   
   // apply designs for parameters
   vector[Ar] Xalpha_shift = XA*alpha_shift;
@@ -236,7 +235,7 @@ transformed parameters{
   array[Cr] matrix[M-1,M-1] XL;
   array[Cr] matrix[M-1,M-1] XLv;
   for(cr in 1:Cr){
-    XL[cr] = inverse_transform_cholesky_factor_corr(to_vector(XtL[cr,]),M-1);
+    XL[cr] = cholesky_factor_corr_constrain(to_vector(XtL[cr,]),M-1);
     Xalpha[cr,] = Xalpha[cr,] - sum(log(diagonal(XL[cr])))/(M-1);
     XLv[cr] = diag_pre_multiply(exp(Xalpha[cr,]),XL[cr]); 
   }
