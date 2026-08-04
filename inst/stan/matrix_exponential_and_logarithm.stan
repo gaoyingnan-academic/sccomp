@@ -5,7 +5,7 @@
     matrix[M,M] Q; // matrix of column-eigenvectors
     matrix[M,M] log_B;
     (Q,lambda) = eigendecompose_sym(B);
-    for(m in 1:M) lambda[m] = fmax(lambda[m], 1e-12); //enforce strict positive eigenvalues
+    //for(m in 1:M) lambda[m] = fmax(lambda[m], 1e-12); //enforce strict positive eigenvalues
     log_B = Q*diag_matrix(log(lambda))*Q';
     return to_vector(log_B); // return vectorized matrix for internal use
     // technically only the lower/upper triangle part with the diagonal is required
@@ -20,7 +20,7 @@
     matrix[M,M] Q; // matrix of column-eigenvectors
     matrix[M,M] exp_B;
     (Q,lambda) = eigendecompose_sym(B);
-    for(m in 1:M) lambda[m] = fmax(lambda[m], 1e-12); //enforce strict positive eigenvalues
+    //for(m in 1:M) lambda[m] = fmax(lambda[m], 1e-12); //enforce strict positive eigenvalues
     exp_B = Q*diag_matrix(exp(lambda))*Q';
     exp_B = (exp_B+exp_B')/2; // To avoid 'A is not symmetric' problem due to floating error.
     return cholesky_decompose(exp_B); // return Cholesky factor for internal use
