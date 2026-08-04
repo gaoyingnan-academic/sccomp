@@ -227,7 +227,7 @@ transformed parameters{
   for(c in 1:C){
     alpha[c,] = alpha[c,] - sum(log(diagonal(L[c])))/(M-1);
     tV[c,] = to_row_vector(vectorized_matrix_log_spd(
-      multiply_lower_tri_self_transpose(diag_pre_multiply(alpha[c,],L[c]))
+      multiply_lower_tri_self_transpose(diag_pre_multiply(exp(alpha[c,]),L[c]))
     ));
   }
 
