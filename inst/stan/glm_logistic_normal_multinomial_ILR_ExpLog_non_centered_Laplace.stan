@@ -116,10 +116,10 @@ data{
   
   // Prior info
   array[2] real prior_scale_norm_mean;
-  array[2] real prior_scale_norm_sd;
-  array[2] real prior_mean_norm_sd; // mean of normal prior must be 0 for means
-  array[2] real prior_sd_norm_sd; // mean of normal prior must be 0 for normalised sd
-  array[2] real<lower=0> prior_corr_lkj_eta; 
+  array[2] real<lower=0> prior_scale_norm_sd;
+  array[2] real<lower=0> prior_mean_norm_sd; // mean of normal prior must be 0 for means
+  array[2] real<lower=0> prior_diagV_norm_sd; // mean of normal prior must be 0 for diagonal elements of log-VCoV
+  array[2] real<lower=0> prior_ltriV_norm_sd; // mean of normal prior must be 0 for off-diagonal elements of log-VCoV
 
   // Random effect designs
 
@@ -158,7 +158,7 @@ transformed data{
   }else{
     Helmert = canonical_Helmert(M);
   }
-  matrix[M-1,M-2] H_alpha = canonical_Helmert(M-1);
+  matrix[M-1,M-2] H_minus_1 = canonical_Helmert(M-1);
   
   // centered and isometric log-ratio transformed data (only relevant for proportional input)
   matrix[N * is_proportion,M] clr_y_proportion;
@@ -197,11 +197,11 @@ parameters{
   // ILR means, not constrained
   matrix[B, M-1] beta_raw; // M-1 degree of freedom
 
-  // ILR log-standard deviations, normalised
-  matrix[C, M-2] alpha_raw; // M-2 degree of freedom as scale moves out
+  // ILR log-VCoV diagonal elements, normalised
+  matrix[C, M-2] diag_tV_raw; // M-2 degree of freedom as scale moves out
   
-  // ILR Cholesky factors for correlation matrices
-  array[C] cholesky_factor_corr[M-1] L;
+  // ILR log-VCoV lower-triangular elements, unconstrained
+  matrix[C, Cholesky_df] offdiag_tV_raw;
   
   //
 }
@@ -218,17 +218,22 @@ transformed parameters{
   matrix[B, M-1] beta = beta_raw * prior_mean_norm_sd[2];
   beta[1:B_intercept_columns,] = beta_raw[1:B_intercept_columns,] * prior_mean_norm_sd[1];
   
-  // Non-centered parameterisation for ILR normalised log-standard deviations
-  matrix[C, M-1] alpha = alpha_raw * H_alpha' * prior_sd_norm_sd[2];
-  alpha[1:C_intercept_columns,] = 
-    alpha_raw[1:C_intercept_columns,] * H_alpha' * prior_sd_norm_sd[1];
-  // normalise the generalised variance (determinant of VCoV) to 1 and take matrix log
-  matrix[C,(M-1)*(M-1)] tV; // vectorised matrix logarithm of VCoV
+  // Non-centered parameterisation for ILR normalised log-VCoV
+  // constraining determinant of VCoV to 1 equivalent to sum-to-zero on diagonal elements of log-VCoV
+  matrix[C, M-1] diag_tV = diag_tV_raw * H_minus_1' * prior_diagV_norm_sd[2];
+  diag_tV[1:C_intercept_columns,] = 
+    diag_tV_raw[1:C_intercept_columns,] * H_minus_1' * prior_diagV_norm_sd[1];
+  // off-diagonal elements in log VCoV is unconstrained at all
+  matrix[C,Cholesky_df] offdiag_tV = offdiag_tV_raw * prior_ltriV_norm_sd[2];
+  offdiag_tV[1:C_intercept_columns,] = 
+    offdiag_tV_raw[1:C_intercept_columns,] * prior_ltriV_norm_sd[1];
+    
+  // assemble diagonal and off-diagonal elements in reshaped 1D log-VCoV
+  matrix[C,(M-1)*(M-1)] tV;
   for(c in 1:C){
-    alpha[c,] = alpha[c,] - sum(log(diagonal(L[c])))/(M-1);
-    tV[c,] = to_row_vector(vectorized_matrix_log_spd(
-      multiply_lower_tri_self_transpose(diag_pre_multiply(exp(alpha[c,]),L[c]))
-    ));
+    tV[c,] = to_row_vector(
+      sym_matrix_from_vectors(to_vector(diag_tV[c,]), to_vector(offdiag_tV[c,]))
+      );
   }
 
   // apply designs for parameters
@@ -276,15 +281,9 @@ model{
   // Priors
   alpha_shift_raw  ~ std_normal();
   for(b in 1:B) beta_raw[b,] ~ std_normal();
-  for(c in 1:C_intercept_columns){
-    alpha_raw[c,] ~ std_normal();
-    L[c] ~ lkj_corr_cholesky(prior_corr_lkj_eta[1]);
-  }
-  if(C_intercept_columns < C){
-    for(c in (C_intercept_columns+1):C){
-      alpha_raw[c,] ~ std_normal();
-      L[c] ~ lkj_corr_cholesky(prior_corr_lkj_eta[2]);
-    }
+  for(c in 1:C){
+    diag_tV_raw[c,] ~ std_normal();
+    offdiag_tV_raw[c] ~ std_normal();
   }
   
 }
