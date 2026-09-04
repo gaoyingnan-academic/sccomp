@@ -23,3 +23,19 @@
     exp_B = (exp_B+exp_B')/2; // To avoid 'A is not symmetric' problem due to floating error.
     return cholesky_decompose(exp_B); // return Cholesky factor for internal use
   }
+
+  // assemble symmetric matrix from sampled diagonal and off-diagonal vector
+  matrix sym_matrix_from_vectors(vector diag_b, vector off_diag_b){
+    int M = num_elements(diag_b); // length of off_diag_b not checked for internal use
+    matrix[M,M] B = diag_matrix(diag_b);
+    int i;
+    int j = 0;
+    // construct symmetric matrix by subdiagonal
+    for(m in 2:M){
+      i = j+1;
+      j = i+M-m;
+      B[m:M,1:(M-m+1)]+=diag_matrix(off_diag_b[i:j]);
+      B[1:(M-m+1),m:M]+=diag_matrix(off_diag_b[i:j]);
+    }
+    return B;
+  }
