@@ -295,8 +295,16 @@ generated quantities {
   // Sanity check for sampled parameters
   vector[Cr*is_vb] log_detV;
   if(is_vb){
-    for(c in 1:Cr)
-    log_detV[c] = sum(log(diagonal(XLv[c]))); // This should always be 0
+    for(c in 1:Cr) log_detV[c] = sum(log(diagonal(XLv[c]))); // This should always be 0
+  }
+  
+  vector[Cr*is_vb] sum_square_diff_XLv;
+  if(is_vb){
+    matrix[M-1,M-1] diff_XLv;
+    for(c in 1:Cr){
+      diff_XLv = unvectorized_matrix_exp_spd(to_vector(XtV[c,])) - XLv[c];
+      sum_square_diff_XLv[c] = sum(diff_XLv .* diff_XLv); // as small as possible
+    }
   }
   
   // Transform parameters back to CLR space for interpretability
