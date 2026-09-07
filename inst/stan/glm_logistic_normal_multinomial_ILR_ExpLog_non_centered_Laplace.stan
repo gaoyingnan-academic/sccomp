@@ -242,7 +242,10 @@ transformed parameters{
   matrix[Cr, (M-1)*(M-1)] XtV = XC*tV;
   array[Cr] matrix[M-1,M-1] XLv;
   for(cr in 1:Cr){
-    XLv[cr] = unvectorized_matrix_exp_spd(to_vector(XtV[cr,]));
+    // expm via eigendecomposition
+    //XLv[cr] = unvectorized_matrix_exp_spd(to_vector(XtV[cr,]));
+    // truncated Taylor's series
+    XLv[cr] = unvectorized_matrix_exp_taylor(to_vector(XtV[cr,]),16,8);
   }
   
 }
