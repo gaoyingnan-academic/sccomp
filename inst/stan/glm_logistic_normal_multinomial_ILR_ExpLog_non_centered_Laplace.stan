@@ -144,6 +144,10 @@ data{
   int<lower=0> laplace_max_iter; // maximum number of steps for optimizer
   int<lower=1, upper=3> laplace_solver; // Newton solver type being used
   
+  // options for matrix exponential approximation via Taylor's expansion
+  int<lower=4> taylor_K; // terms to use in Taylor's expansion
+  int<lower=4> taylor_s; // scaling of exponential so Taylor's expansion
+  
   // External constants
   int<lower=0, upper=1> use_external_basis; // Allow user-supplied isometric basis
   matrix[M,M-1] external_basis; 
@@ -245,7 +249,7 @@ transformed parameters{
     // expm via eigendecomposition
     //XLv[cr] = unvectorized_matrix_exp_spd(to_vector(XtV[cr,]));
     // truncated Taylor's series
-    XLv[cr] = unvectorized_matrix_exp_taylor(to_vector(XtV[cr,]),16,8);
+    XLv[cr] = unvectorized_matrix_exp_taylor(to_vector(XtV[cr,]),taylor_K,taylor_s);
   }
   
 }
