@@ -62,7 +62,7 @@ functions{
       if(is_proportion){
         for(n in 1:N){
           target_lp += multi_normal_cholesky_lpdf(
-            y_proportion[n,] |
+            y_proportion[idx_y[n],] |
             to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],]), 
             exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * XLv[Xn_to_XQ[idx_y[n],3]]
           );
