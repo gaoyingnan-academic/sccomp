@@ -115,12 +115,15 @@ data{
   int<lower=0, upper=1> is_vb;
   
   // Prior info
-  array[2] real prior_scale_norm_mean;
-  array[2] real<lower=0> prior_scale_norm_sd;
-  array[2] real<lower=0> prior_mean_norm_sd; // mean of normal prior must be 0 for means
-  array[2] real<lower=0> prior_diagV_norm_sd; // mean of normal prior must be 0 for diagonal elements of log-VCoV
-  array[2] real<lower=0> prior_ltriV_norm_sd; // mean of normal prior must be 0 for off-diagonal elements of log-VCoV
-
+  vector[A] prior_scale_norm_mean;
+  vector<lower=0>[A]  prior_scale_norm_sd;
+  matrix[B, M-1] prior_mean_norm_mean;
+  matrix<lower=0>[B, M-1]  prior_mean_norm_sd;
+  matrix[C, M-2] prior_diagV_norm_mean;
+  matrix<lower=0>[C, M-2]  prior_diagV_norm_sd;
+  matrix[C, ((M-1)*(M-2))%/%2] prior_ltriV_norm_mean;
+  matrix<lower=0>[C, ((M-1)*(M-2))%/%2] prior_ltriV_norm_sd;
+  
   // Random effect designs
 
 
@@ -212,25 +215,19 @@ parameters{
 
 transformed parameters{
   // Non-centered parameterisation for variability scales
-  vector[A] alpha_shift = alpha_shift_raw * prior_scale_norm_sd[2] + prior_scale_norm_mean[2];
-  alpha_shift[1:A_intercept_columns] = 
-    alpha_shift_raw[1:A_intercept_columns] * prior_scale_norm_sd[1] + 
-    prior_scale_norm_mean[1];
+  vector[A] alpha_shift = alpha_shift_raw .* prior_scale_norm_sd + prior_scale_norm_mean;
   
   // Non-centered parameterisation for ILR means
   // Note that mean of the prior distribution of means must be 0
-  matrix[B, M-1] beta = beta_raw * prior_mean_norm_sd[2];
-  beta[1:B_intercept_columns,] = beta_raw[1:B_intercept_columns,] * prior_mean_norm_sd[1];
-  
+  matrix[B, M-1] beta = beta_raw .* prior_mean_norm_sd + prior_mean_norm_mean;
+
   // Non-centered parameterisation for ILR normalised log-VCoV
   // constraining determinant of VCoV to 1 equivalent to sum-to-zero on diagonal elements of log-VCoV
-  matrix[C, M-1] diag_tV = diag_tV_raw * H_minus_1' * prior_diagV_norm_sd[2];
-  diag_tV[1:C_intercept_columns,] = 
-    diag_tV_raw[1:C_intercept_columns,] * H_minus_1' * prior_diagV_norm_sd[1];
+  matrix[C, M-2] diag_tV_raw_scaled = diag_tV_raw .* prior_diagV_norm_sd + prior_diagV_norm_mean;
+  matrix[C, M-1] diag_tV = diag_tV_raw_scaled * H_minus_1';
+
   // off-diagonal elements in log VCoV is unconstrained at all
-  matrix[C,Cholesky_df] offdiag_tV = offdiag_tV_raw * prior_ltriV_norm_sd[2];
-  offdiag_tV[1:C_intercept_columns,] = 
-    offdiag_tV_raw[1:C_intercept_columns,] * prior_ltriV_norm_sd[1];
+  matrix[C, Cholesky_df] offdiag_tV = offdiag_tV_raw .* prior_ltriV_norm_sd + prior_ltriV_norm_mean;
     
   // assemble diagonal and off-diagonal elements in reshaped 1D log-VCoV
   matrix[C,(M-1)*(M-1)] tV;
@@ -246,9 +243,7 @@ transformed parameters{
   matrix[Cr, (M-1)*(M-1)] XtV = XC*tV;
   array[Cr] matrix[M-1,M-1] XLv;
   for(cr in 1:Cr){
-    // expm via eigendecomposition
-    //XLv[cr] = unvectorized_matrix_exp_spd(to_vector(XtV[cr,]));
-    // truncated Taylor's series
+    // expm via truncated Taylor's series
     XLv[cr] = unvectorized_matrix_exp_taylor(to_vector(XtV[cr,]),taylor_K,taylor_s);
   }
   
