@@ -37,12 +37,16 @@ functions{
     // Data
     int M, 
     int is_proportion,
-    array[,] int y, //Sliced, M dimensions
-    matrix y_proportion, // Sliced, ILR, M-1 dimensions
+    array[,] int y, // Sliced, M dimensions
+    matrix y_proportion, // Unsliced, ILR, M-1 dimensions
     
     // Fixed effects
     vector Xalpha_shift,
     matrix Xbeta, // ILR-transformed, M-1 dimensions 
+    matrix XtV, // design-specific logVCov, M-1 dimensions
+    int precalculate_vcov, // whether XLv supplied below has been fully initialised
+    int taylor_K; // terms to use in Taylor's expansion
+    int taylor_s; // scaling of exponential so Taylor's expansion
     array[] matrix XLv, // Cholesky factor of covariances, ILR, M-1 dimensions
     
     // Fixed effect mapping
@@ -58,6 +62,17 @@ functions{
       // target log-probability
       real target_lp = 0;
       
+      // calculate XLv when not precalculated
+      array[N] matrix[M-1,M-1] this_XLv;
+      if(precalculate_vcov){
+        this_XLv = XLv[idx_y];
+      }
+      else{
+        for(n in 1:N){
+          // expm via truncated Taylor's series
+          this_XLv[n] = unvectorized_matrix_exp_taylor(to_vector(XtV[idx_y[n],]),taylor_K,taylor_s);
+          }
+      }
       // If input is proportions
       if(is_proportion){
         for(n in 1:N){
@@ -129,6 +144,8 @@ data{
 
   // Priors for random effects
   
+  // Pre-calculate design-specific VCoV
+  int<lower=0, upper=1> precalculate_vcov;
   
   // Exclude data for testing purposes
   int<lower=0, upper=1> use_data;
@@ -241,15 +258,20 @@ transformed parameters{
   vector[Ar] Xalpha_shift = XA*alpha_shift;
   matrix[Br, M-1] Xbeta = XB*beta;
   matrix[Cr, (M-1)*(M-1)] XtV = XC*tV;
-  array[Cr] matrix[M-1,M-1] XLv;
-  for(cr in 1:Cr){
+  
+  // Cholesky factor corresponding to log-VCoV is computationally expensive
+  array[Cr] matrix[M-1,M-1] XLv = rep_array(diag_matrix(rep_vector(1.0,M-1)),Cr);
+  if(precalculate_vcov){
+    for(cr in 1:Cr){
     // expm via truncated Taylor's series
     XLv[cr] = unvectorized_matrix_exp_taylor(to_vector(XtV[cr,]),taylor_K,taylor_s);
+    }
   }
   
 }
 
 model{
+  
   // Fit main distribution
   if(use_data == 1){
     
@@ -267,6 +289,10 @@ model{
       // Fixed effects
       Xalpha_shift,
       Xbeta,
+      XtV,
+      precalculate_vcov, 
+      taylor_K; 
+      taylor_s;
       XLv,
       
       // Fixed effect mapping
@@ -297,8 +323,8 @@ generated quantities {
     for(c in 1:Cr) log_detV[c] = sum(log(diagonal(XLv[c]))); // This should always be 0
   }
   
-  vector[Cr*is_vb] sum_square_diff_XLv;
-  if(is_vb){
+  vector[Cr*is_vb*precalculate_vcov] sum_square_diff_XLv;
+  if(is_vb*precalculate_vcov){
     matrix[M-1,M-1] diff_XLv;
     for(c in 1:Cr){
       diff_XLv = unvectorized_matrix_exp_spd(to_vector(XtV[c,])) - XLv[c];
@@ -322,9 +348,9 @@ generated quantities {
   }
   
   // Goodness-of-fit through simulation
-  matrix[N*enable_gof, M] sim_mu;
-  array[N*enable_gof * !is_proportion, M] int sim_y;
-  if(enable_gof==1){
+  matrix[N*enable_gof*precalculate_vcov, M] sim_mu;
+  array[N*enable_gof*precalculate_vcov * !is_proportion, M] int sim_y;
+  if(enable_gof*precalculate_vcov){
     matrix[M-1,N] latent_mu;
     for(n in 1:N){
       latent_mu[,n] = multi_normal_cholesky_rng(
@@ -338,8 +364,8 @@ generated quantities {
   }
   
   // LOO
-  vector[N*enable_loo] log_lik;
-  if(enable_loo==1){
+  vector[N*enable_loo*precalculate_vcov] log_lik;
+  if(enable_loo*precalculate_vcov){
     // reuse partial sum function to sync any change in LL calculation
     for(n in 1:N){
       log_lik[n] = partial_sum_2_lpmf(
@@ -347,7 +373,8 @@ generated quantities {
         // Data
         M, is_proportion, y, ilr_y_proportion,
         // Fixed effects
-        Xalpha_shift, Xbeta, XLv,
+        Xalpha_shift, Xbeta,
+        XtV, precalculate_vcov, taylor_K, taylor_s, XLv,
         // Fixed effect mapping
         Xn_to_XQ,
         // Helmert matrix
