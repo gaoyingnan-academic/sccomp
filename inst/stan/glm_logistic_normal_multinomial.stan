@@ -259,6 +259,9 @@ transformed parameters{
   matrix[Br, M-1] Xbeta = XB*beta;
   matrix[Cr, (M-1)*(M-1)] XtV = XC*tV;
   
+}
+
+model{
   // Cholesky factor corresponding to log-VCoV is computationally expensive
   array[Cr] matrix[M-1,M-1] XLv = rep_array(diag_matrix(rep_vector(1.0,M-1)),Cr);
   if(precalculate_vcov){
@@ -267,10 +270,6 @@ transformed parameters{
     XLv[cr] = unvectorized_matrix_exp_taylor(to_vector(XtV[cr,]),taylor_K,taylor_s);
     }
   }
-  
-}
-
-model{
   
   // Fit main distribution
   if(use_data == 1){
@@ -314,74 +313,4 @@ model{
     offdiag_tV_raw[c] ~ std_normal();
   }
   
-}
-
-generated quantities {
-  // Sanity check for sampled parameters
-  vector[Cr*is_vb] log_detV;
-  if(is_vb){
-    for(c in 1:Cr) log_detV[c] = sum(log(diagonal(XLv[c]))); // This should always be 0
-  }
-  
-  vector[Cr*is_vb*precalculate_vcov] sum_square_diff_XLv;
-  if(is_vb*precalculate_vcov){
-    matrix[M-1,M-1] diff_XLv;
-    for(c in 1:Cr){
-      diff_XLv = unvectorized_matrix_exp_spd(to_vector(XtV[c,])) - XLv[c];
-      sum_square_diff_XLv[c] = sum(diff_XLv .* diff_XLv); // as small as possible
-    }
-  }
-  
-  // Transform parameters back to CLR space for interpretability
-  // Scaling remains the same and does not need transformation
-  matrix[B,M] beta_CLR = beta*Helmert';
-  matrix[Br,M] Xbeta_CLR = Xbeta*Helmert';
-
-  // Covariances are interperted after designs are applied
-  matrix[Cr, M] sigma_CLR;
-  matrix[Cr, M] alpha_CLR;
-  array[Cr] matrix[M,M] R_CLR;
-  for(c in 1:Cr){
-    (sigma_CLR[c,],R_CLR[c]) = get_std_and_corr_of_VCoV(
-      Helmert*multiply_lower_tri_self_transpose(XLv[c])*Helmert');
-    alpha_CLR[c,] = log(sigma_CLR[c,]);
-  }
-  
-  // Goodness-of-fit through simulation
-  matrix[N*enable_gof*precalculate_vcov, M] sim_mu;
-  array[N*enable_gof*precalculate_vcov * !is_proportion, M] int sim_y;
-  if(enable_gof*precalculate_vcov){
-    matrix[M-1,N] latent_mu;
-    for(n in 1:N){
-      latent_mu[,n] = multi_normal_cholesky_rng(
-        to_vector(Xbeta[Xn_to_XQ[n,2],]), 
-        exp(Xalpha_shift[Xn_to_XQ[n,1]]) * XLv[Xn_to_XQ[n,3]]);
-      sim_mu[n,] = to_row_vector(Helmert*latent_mu[,n]);
-      }
-    if(!is_proportion){
-      for(n in 1:N) sim_y[n,] = multinomial_logit_rng(to_vector(sim_mu[n,]), ysum[n]);
-    }
-  }
-  
-  // LOO
-  vector[N*enable_loo*precalculate_vcov] log_lik;
-  if(enable_loo*precalculate_vcov){
-    // reuse partial sum function to sync any change in LL calculation
-    for(n in 1:N){
-      log_lik[n] = partial_sum_2_lpmf(
-        {n}|n,n, // per-sample block
-        // Data
-        M, is_proportion, y, ilr_y_proportion,
-        // Fixed effects
-        Xalpha_shift, Xbeta,
-        XtV, precalculate_vcov, taylor_K, taylor_s, XLv,
-        // Fixed effect mapping
-        Xn_to_XQ,
-        // Helmert matrix
-        Helmert,
-        // Laplace approximation options
-        laplace_ops
-      );
-    }
-  }
 }
