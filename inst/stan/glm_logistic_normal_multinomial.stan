@@ -45,8 +45,8 @@ functions{
     matrix Xbeta, // ILR-transformed, M-1 dimensions 
     matrix XtV, // design-specific logVCov, M-1 dimensions
     int precalculate_vcov, // whether XLv supplied below has been fully initialised
-    int taylor_K; // terms to use in Taylor's expansion
-    int taylor_s; // scaling of exponential so Taylor's expansion
+    int taylor_K, // terms to use in Taylor's expansion
+    int taylor_s, // scaling of exponential so Taylor's expansion
     array[] matrix XLv, // Cholesky factor of covariances, ILR, M-1 dimensions
     
     // Fixed effect mapping
@@ -290,8 +290,8 @@ model{
       Xbeta,
       XtV,
       precalculate_vcov, 
-      taylor_K; 
-      taylor_s;
+      taylor_K, 
+      taylor_s,
       XLv,
       
       // Fixed effect mapping
