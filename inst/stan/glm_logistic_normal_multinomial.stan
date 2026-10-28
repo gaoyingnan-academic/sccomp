@@ -165,8 +165,8 @@ data{
   int<lower=1, upper=3> laplace_solver; // Newton solver type being used
   
   // options for matrix exponential approximation via Taylor's expansion
-  int<lower=4> taylor_K; // terms to use in Taylor's expansion
-  int<lower=4> taylor_s; // scaling of exponential so Taylor's expansion
+  int<lower=1> taylor_K; // terms to use in Taylor's expansion
+  int<lower=1> taylor_s; // scaling of exponential so Taylor's expansion
   
   // External constants
   int<lower=0, upper=1> use_external_basis; // Allow user-supplied isometric basis
