@@ -266,8 +266,20 @@ model{
 }
 
 generated quantities {
-  // Recalculate Cholesky factor corresponding to log VCoV as local variable
+  // Validity check for sampled normalised VCoV
+  vector[Cr*is_vb] log_detV;
+  // Accuracy check for custom, autodiff friendly expm functions
+  vector[Cr*is_vb] Frobenius_error_XLv_taylor;
+  vector[Cr*is_vb] Frobenius_error_XLv_pade;
+  vector[Cr*is_vb] Frobenius_norm_XLv;
+  // Goodness-of-fit through simulation
+  matrix[N * enable_gof, M] sim_mu;
+  array[N * enable_gof * !is_proportion, M] int sim_y;
+  // LOO
+  vector[N * enable_loo * use_data] log_lik;
+  
   {
+    // Recalculate Cholesky factor corresponding to log VCoV as local variable
     array[Cr] matrix[M-1,M-1] XLv_taylor;
     array[Cr] matrix[M-1,M-1] XLv_pade;
     array[Cr] matrix[M-1,M-1] XLv_eigen;
@@ -277,64 +289,56 @@ generated quantities {
     XLv_pade[cr] = unvectorized_matrix_exp_pade(to_vector(XtV[cr,]),taylor_s);
     XLv_eigen[cr] = unvectorized_matrix_exp_spd(to_vector(XtV[cr,]));
     }
-  }
-  
-  // Validity check for sampled normalised VCoV
-  vector[Cr*is_vb] log_detV;
-  if(is_vb){
-    for(c in 1:Cr) log_detV[c] = sum(log(diagonal(XLv_taylor[c]))); // This should always be 0
-  }
-  
-  // Accuracy check for custom, autodiff friendly expm functions
-  // Test degree-13 Pade approximant for developmental purposes
-  vector[Cr*is_vb] Frobenius_error_XLv_taylor;
-  vector[Cr*is_vb] Frobenius_error_XLv_pade;
-  vector[Cr*is_vb] Frobenius_norm_XLv; 
-  if(is_vb){
-    for(c in 1:Cr){
-      Frobenius_norm_XLv[c] = sqrt(sum(square(XLv_eigen[c]))); // norm base
-      Frobenius_error_XLv_taylor[c] = sqrt(
-        sum(square(XLv_taylor[c] - XLv_eigen[c]))); // as small as possible
-      Frobenius_error_XLv_pade[c] = sqrt(
-        sum(square(XLv_taylor[c] - XLv_eigen[c]))); // as small as possible
+    
+    if(is_vb){
+      for(c in 1:Cr){
+        // Validity check for sampled normalised VCoV
+        log_detV[c] = sum(log(diagonal(XLv_taylor[c]))); // This should always be 0
+        
+        // Accuracy check for custom, autodiff friendly expm functions
+        Frobenius_norm_XLv[c] = sqrt(sum(square(XLv_eigen[c]))); // norm base
+        Frobenius_error_XLv_taylor[c] = sqrt(
+          sum(square(XLv_taylor[c] - XLv_eigen[c]))); // as small as possible
+        // Test degree-13 Pade approximant for developmental purposes
+        Frobenius_error_XLv_pade[c] = sqrt(
+          sum(square(XLv_taylor[c] - XLv_eigen[c]))); // as small as possible
+        }
     }
-  }
-  
-  // Goodness-of-fit through simulation
-  matrix[N * enable_gof, M] sim_mu;
-  array[N * enable_gof * !is_proportion, M] int sim_y;
-  if(enable_gof){
-    matrix[M-1,N] latent_mu;
-    for(n in 1:N){
-      latent_mu[,n] = multi_normal_cholesky_rng(
-        to_vector(Xbeta[Xn_to_XQ[n,2],]), 
-        exp(Xalpha_shift[Xn_to_XQ[n,1]]) * XLv_taylor[Xn_to_XQ[n,3]]);
-      sim_mu[n,] = to_row_vector(Helmert*latent_mu[,n]);
+    
+    // Goodness-of-fit through simulation
+    if(enable_gof){
+      matrix[M-1,N] latent_mu;
+      for(n in 1:N){
+        latent_mu[,n] = multi_normal_cholesky_rng(
+          to_vector(Xbeta[Xn_to_XQ[n,2],]), 
+          exp(Xalpha_shift[Xn_to_XQ[n,1]]) * XLv_taylor[Xn_to_XQ[n,3]]);
+        sim_mu[n,] = to_row_vector(Helmert*latent_mu[,n]);
       }
-    if(!is_proportion){
-      for(n in 1:N) sim_y[n,] = multinomial_logit_rng(to_vector(sim_mu[n,]), ysum[n]);
+      if(!is_proportion){
+        for(n in 1:N) sim_y[n,] = multinomial_logit_rng(to_vector(sim_mu[n,]), ysum[n]);
+      }
+    }
+    
+    // LOO
+    if(enable_loo * use_data){
+      // reuse partial sum function to sync any change in LL calculation
+      for(n in 1:N){
+        log_lik[n] = partial_sum_2_lpmf(
+          {n}|n,n, // per-sample block
+          // Data
+          M, is_proportion, y, ilr_y_proportion,
+          // Fixed effects
+          Xalpha_shift, Xbeta,
+          XtV, 1, taylor_K, taylor_s, XLv_taylor,
+          // Fixed effect mapping
+          Xn_to_XQ,
+          // Helmert matrix
+          Helmert,
+          // Laplace approximation options
+          laplace_ops
+        );
+      }
     }
   }
-  
-  // LOO
-  vector[N * enable_loo * use_data] log_lik;
-  if(enable_loo * use_data){
-    // reuse partial sum function to sync any change in LL calculation
-    for(n in 1:N){
-      log_lik[n] = partial_sum_2_lpmf(
-        {n}|n,n, // per-sample block
-        // Data
-        M, is_proportion, y, ilr_y_proportion,
-        // Fixed effects
-        Xalpha_shift, Xbeta,
-        XtV, 1, taylor_K, taylor_s, XLv_taylor,
-        // Fixed effect mapping
-        Xn_to_XQ,
-        // Helmert matrix
-        Helmert,
-        // Laplace approximation options
-        laplace_ops
-      );
-    }
-  }
+
 }
