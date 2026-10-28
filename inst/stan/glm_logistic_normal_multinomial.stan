@@ -263,7 +263,8 @@ transformed parameters{
 
 model{
   // Cholesky factor corresponding to log-VCoV is computationally expensive
-  array[Cr] matrix[M-1,M-1] XLv = rep_array(diag_matrix(rep_vector(1.0,M-1)),Cr);
+  array[Cr*precalculate_vcov] matrix[M-1,M-1] XLv = 
+    rep_array(diag_matrix(rep_vector(1.0,M-1)),Cr*precalculate_vcov);
   if(precalculate_vcov){
     for(cr in 1:Cr){
     // expm via truncated Taylor's series
