@@ -63,35 +63,41 @@ functions{
       real target_lp = 0;
       
       // calculate XLv when not precalculated
-      array[N] matrix[M-1,M-1] this_XLv;
-      if(precalculate_vcov){
-        this_XLv = XLv[idx_y];
-      }
-      else{
-        for(n in 1:N){
-          // expm via truncated Taylor's series
-          this_XLv[n] = unvectorized_matrix_exp_taylor(to_vector(XtV[idx_y[n],]),taylor_K,taylor_s);
-          }
-      }
+      matrix[M-1,M-1] this_XLv;
+
       // If input is proportions
       if(is_proportion){
         for(n in 1:N){
+          if(precalculate_vcov){
+            this_XLv = XLv[Xn_to_XQ[idx_y[n],3]];
+          }
+          else{
+            // expm via truncated Taylor's series
+            this_XLv = unvectorized_matrix_exp_taylor(to_vector(XtV[Xn_to_XQ[idx_y[n],3],]),taylor_K,taylor_s);
+          }
           target_lp += multi_normal_cholesky_lpdf(
             y_proportion[idx_y[n],] |
             to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],]), 
-            exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * XLv[Xn_to_XQ[idx_y[n],3]]
+            exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * this_XLv
           );
         }
       }
       // If input is counts
       else{
         for(n in 1:N){
+          if(precalculate_vcov){
+            this_XLv = XLv[Xn_to_XQ[idx_y[n],3]];
+          }
+          else{
+            // expm via truncated Taylor's series
+            this_XLv = unvectorized_matrix_exp_taylor(to_vector(XtV[Xn_to_XQ[idx_y[n],3],]),taylor_K,taylor_s);
+          }
           target_lp += laplace_marginal_tol(
             ll_function, //custom log-likelihood function with latent residuals
             (M,to_array_1d(y[idx_y[n],]),to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],]),Helmert), //parameters without latent residuals
             M-1, // Hessian block size
             cov_function, //covariance function for latent residuals
-            (exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * XLv[Xn_to_XQ[idx_y[n],3]],M), // cov_function just converts it to VCoV
+            (exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * this_XLv,M), // cov_function just converts it to VCoV
             laplace_ops // options for laplace approximation
             );
         }
