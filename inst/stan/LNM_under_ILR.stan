@@ -8,22 +8,21 @@ matrix canonical_Helmert(int M){
   return H;
 }
 
-// Sample-level composition random effects already live in ILR (M-1).
-// Returns the RE contribution to the ILR mean for sample n.
+// Composition RE contribution in ILR (M-1). Designs are unique-row XBR / XBR2;
+// Xn_to_XQ[,4] / [,5] index into precomputed XBRbeta / XBRbeta2. Max 2 groupings.
 vector composition_re_ilr(
   int n,
   int M_minus_1,
-  array[] int ncol_X_random_eff,
-  matrix X_random_effect,
-  matrix X_random_effect_2,
-  matrix random_effect,
-  matrix random_effect_2
+  array[] int ncol_XBR,
+  array[,] int Xn_to_XQ,
+  matrix XBRbeta,
+  matrix XBRbeta2
 ) {
   vector[M_minus_1] re = rep_vector(0, M_minus_1);
-  if(ncol_X_random_eff[1] > 0)
-    re += to_vector(X_random_effect[n,] * random_effect);
-  if(ncol_X_random_eff[2] > 0)
-    re += to_vector(X_random_effect_2[n,] * random_effect_2);
+  if(ncol_XBR[1] > 0)
+    re += to_vector(XBRbeta[Xn_to_XQ[n, 4],]);
+  if(ncol_XBR[2] > 0)
+    re += to_vector(XBRbeta2[Xn_to_XQ[n, 5],]);
   return re;
 }
 
@@ -73,15 +72,13 @@ real partial_sum_2_lpmf(
   int taylor_s, // scaling of exponential so Taylor's expansion
   array[] matrix XLv, // Cholesky factor of covariances, ILR, M-1 dimensions
   
-  // Fixed effect mapping
+  // Sample → unique-row map: cols 1–3 = A/B/C FE; cols 4–5 = B-RE1 / B-RE2
   array[,] int Xn_to_XQ,
 
-  // Random effects (ILR-native composition RE; up to 2 groupings)
-  array[] int ncol_X_random_eff,
-  matrix X_random_effect,
-  matrix X_random_effect_2,
-  matrix random_effect,
-  matrix random_effect_2,
+  // Composition RE (ILR-native; unique-row contributions; max 2 groupings)
+  array[] int ncol_XBR,
+  matrix XBRbeta,
+  matrix XBRbeta2,
   
   // Helmert matrix
   matrix Helmert,
@@ -109,9 +106,7 @@ real partial_sum_2_lpmf(
         }
         this_beta = to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],])
           + composition_re_ilr(
-              idx_y[n], M-1, ncol_X_random_eff,
-              X_random_effect, X_random_effect_2,
-              random_effect, random_effect_2
+              idx_y[n], M-1, ncol_XBR, Xn_to_XQ, XBRbeta, XBRbeta2
             );
         target_lp += multi_normal_cholesky_lpdf(
           y_proportion[idx_y[n],] |
@@ -132,9 +127,7 @@ real partial_sum_2_lpmf(
         }
         this_beta = to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],])
           + composition_re_ilr(
-              idx_y[n], M-1, ncol_X_random_eff,
-              X_random_effect, X_random_effect_2,
-              random_effect, random_effect_2
+              idx_y[n], M-1, ncol_XBR, Xn_to_XQ, XBRbeta, XBRbeta2
             );
         target_lp += laplace_marginal_tol(
           ll_function, //custom log-likelihood function with latent residuals
