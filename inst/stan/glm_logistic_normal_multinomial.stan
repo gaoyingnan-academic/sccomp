@@ -1,4 +1,5 @@
 functions{
+  #include common_functions.stan
   #include LNM_under_ILR.stan
   #include matrix_exponential_and_logarithm.stan
   // To ensure that sampler and quantity generator use the same functions
@@ -28,7 +29,8 @@ data{
   matrix[Ar, A] XA; // The unique variability scaling design
   matrix[Br, B] XB; // The unique mean design
   matrix[Cr, C] XC; // The unique covariance design
-  array[N,3] int Xn_to_XQ; // The indice map of sample designs to unique designs
+  // Sample → unique-row map: cols 1–3 = A/B/C FE; cols 4–5 = composition RE1 / RE2
+  array[N,5] int Xn_to_XQ;
 
   // Verbose (for diagnostic and debugging)
   int<lower=0, upper=1> is_vb;
@@ -43,10 +45,20 @@ data{
   matrix[C, ((M-1)*(M-2))%/%2] prior_ltriV_norm_mean;
   matrix<lower=0>[C, ((M-1)*(M-2))%/%2] prior_ltriV_norm_sd;
   
-  // Random effect designs
+  // Composition random effects on the B (mean) axis — max 2 groupings.
+  // Unique-row designs XBR / XBR2 (like XA/XB/XC); gate on ncol_XBR[k] > 0 (no is_random_effect).
+  // ILR-native coeffs (M-1); no mean–variability association.
+  array[2] int ncol_XBR;
+  int<lower=0> BRr;  // unique rows in XBR
+  int<lower=0> BRr2; // unique rows in XBR2
+  matrix[BRr, ncol_XBR[1]] XBR;
+  matrix[BRr2, ncol_XBR[2]] XBR2;
 
-
-  // Priors for random effects
+  // Covariance setup within each RE grouping (per ILR coordinate)
+  array[2] int n_groups_B;
+  array[2] int how_many_factors_in_XBR;
+  array[how_many_factors_in_XBR[1], n_groups_B[1]] int group_factor_indexes_XBR;
+  array[how_many_factors_in_XBR[2], n_groups_B[2]] int group_factor_indexes_XBR2;
   
   // Pre-calculate design-specific VCoV
   int<lower=0, upper=1> precalculate_vcov;
@@ -130,8 +142,24 @@ parameters{
   
   // ILR log-VCoV lower-triangular elements, unconstrained
   matrix[C, Cholesky_df] offdiag_tV_raw;
-  
-  //
+
+  // Composition RE: unconstrained ILR (M-1) per RE column (B axis)
+  array[ncol_XBR[1]] vector[M-1] beta_random_raw;
+  array[ncol_XBR[2]] vector[M-1] beta_random_raw_2;
+
+  // SD hyperparameters of random effects (slot [1]/[2] for the two groupings)
+  array[2 * (ncol_XBR[1]>0)] real beta_random_sigma_mu;
+  array[2 * (ncol_XBR[1]>0)] real beta_random_sigma_sigma;
+
+  // Within-grouping factor covariance (per ILR coordinate)
+  array[(M-1) * (ncol_XBR[1]>0)] vector[how_many_factors_in_XBR[1]] beta_random_sigma_raw;
+  array[(M-1) * (ncol_XBR[1]>0)] cholesky_factor_corr[how_many_factors_in_XBR[1] * (ncol_XBR[1]>0)] sigma_correlation_factor_B;
+
+  array[(M-1) * (ncol_XBR[2]>0)] vector[how_many_factors_in_XBR[2]] beta_random_sigma_raw_2;
+  array[(M-1) * (ncol_XBR[2]>0)] cholesky_factor_corr[how_many_factors_in_XBR[2] * (ncol_XBR[2]>0)] sigma_correlation_factor_B_2;
+
+  // If I have just one group
+  array[ncol_XBR[1]>0] real zero_beta_random;
 }
 
 transformed parameters{
@@ -162,7 +190,53 @@ transformed parameters{
   vector[Ar] Xalpha_shift = XA*alpha_shift;
   matrix[Br, M-1] Xbeta = XB*beta;
   matrix[Cr, (M-1)*(M-1)] XtV = XC*tV;
-  
+
+  // Non-centered SD of random effects (per ILR coordinate)
+  array[(M-1) * (ncol_XBR[1]>0)] vector[how_many_factors_in_XBR[1]] beta_random_sigma;
+  if(ncol_XBR[1]>0) for(k in 1:(M-1)) beta_random_sigma[k] = beta_random_sigma_mu[1] + beta_random_sigma_sigma[1] * beta_random_sigma_raw[k];
+  if(ncol_XBR[1]>0) for(k in 1:(M-1)) beta_random_sigma[k] = exp(beta_random_sigma[k]/3.0);
+
+  array[(M-1) * (ncol_XBR[2]>0)] vector[how_many_factors_in_XBR[2]] beta_random_sigma_2;
+  if(ncol_XBR[2]>0) for(k in 1:(M-1)) beta_random_sigma_2[k] = beta_random_sigma_mu[2] + beta_random_sigma_sigma[2] * beta_random_sigma_raw_2[k];
+  if(ncol_XBR[2]>0) for(k in 1:(M-1)) beta_random_sigma_2[k] = exp(beta_random_sigma_2[k]/3.0);
+
+  matrix[ncol_XBR[1], M-1] beta_random;
+  matrix[ncol_XBR[2], M-1] beta_random_2;
+  // Unique-row RE contributions (looked up via Xn_to_XQ[,4]/[,5])
+  matrix[BRr, M-1] XBRbeta;
+  matrix[BRr2, M-1] XBRbeta2;
+
+  if(ncol_XBR[1]>0){
+    beta_random =
+      get_random_effect_matrix(
+        M-1,
+        n_groups_B[1],
+        how_many_factors_in_XBR[1],
+        1, // unused inside get_random_effect_matrix; gated by ncol_XBR
+        ncol_XBR[1],
+        group_factor_indexes_XBR,
+        beta_random_raw,
+        beta_random_sigma,
+        sigma_correlation_factor_B
+      );
+    XBRbeta = XBR * beta_random;
+  }
+
+  if(ncol_XBR[2]>0){
+    beta_random_2 =
+      get_random_effect_matrix(
+        M-1,
+        n_groups_B[2],
+        how_many_factors_in_XBR[2],
+        1,
+        ncol_XBR[2],
+        group_factor_indexes_XBR2,
+        beta_random_raw_2,
+        beta_random_sigma_2,
+        sigma_correlation_factor_B_2
+      );
+    XBRbeta2 = XBR2 * beta_random_2;
+  }
 }
 
 model{
@@ -199,8 +273,13 @@ model{
       taylor_s,
       XLv,
       
-      // Fixed effect mapping
+      // Unique-row map (FE + RE)
       Xn_to_XQ,
+
+      // Composition RE (unique-row ILR contributions)
+      ncol_XBR,
+      XBRbeta,
+      XBRbeta2,
       
       // Helmert matrix
       Helmert,
@@ -217,5 +296,21 @@ model{
     diag_tV_raw[c,] ~ std_normal();
     offdiag_tV_raw[c] ~ std_normal();
   }
-  
+
+  // Composition RE priors (ILR-native; no mean–variability association)
+  if(ncol_XBR[1]>0){
+    for(k in 1:(M-1)) beta_random_raw[,k] ~ std_normal();
+    for(k in 1:(M-1)) beta_random_sigma_raw[k] ~ std_normal();
+    for(k in 1:(M-1)) sigma_correlation_factor_B[k] ~ lkj_corr_cholesky(2);
+
+    beta_random_sigma_mu ~ std_normal();
+    beta_random_sigma_sigma ~ std_normal();
+
+    zero_beta_random ~ std_normal();
+  }
+  if(ncol_XBR[2]>0){
+    for(k in 1:(M-1)) beta_random_raw_2[,k] ~ std_normal();
+    for(k in 1:(M-1)) beta_random_sigma_raw_2[k] ~ std_normal();
+    for(k in 1:(M-1)) sigma_correlation_factor_B_2[k] ~ lkj_corr_cholesky(2);
+  }
 }
