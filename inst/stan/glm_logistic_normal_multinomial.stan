@@ -45,14 +45,14 @@ data{
   matrix<lower=0>[C, ((M-1)*(M-2))%/%2] prior_ltriV_norm_sd;
   
   // Random effect designs (composition; up to 2 groupings from formula_composition)
-  // Sample-level design × cell-group sum_to_zero coefficients — matches BB.
+  // Sample-level design × ILR (M-1) coefficients — LNM-native, not BB CLR/sum_to_zero.
   // No mean–variability association for these random effects.
   int is_random_effect;
   array[2] int ncol_X_random_eff;
   matrix[N, ncol_X_random_eff[1]] X_random_effect;
   matrix[N, ncol_X_random_eff[2]] X_random_effect_2;
 
-  // Covariance setup within each random-effect grouping (per cell type)
+  // Covariance setup within each random-effect grouping (per ILR coordinate)
   array[2] int n_groups;
   array[2] int how_many_factors_in_random_design;
   array[how_many_factors_in_random_design[1], n_groups[1]] int group_factor_indexes_for_covariance;
@@ -141,20 +141,20 @@ parameters{
   // ILR log-VCoV lower-triangular elements, unconstrained
   matrix[C, Cholesky_df] offdiag_tV_raw;
 
-  // Composition random effects: sum_to_zero over M cell groups per RE column
-  array[ncol_X_random_eff[1] * (is_random_effect>0)] sum_to_zero_vector[M] random_effect_raw;
-  array[ncol_X_random_eff[2] * (ncol_X_random_eff[2]>0)] sum_to_zero_vector[M] random_effect_raw_2;
+  // Composition random effects: unconstrained ILR coordinates (M-1) per RE column
+  array[ncol_X_random_eff[1] * (is_random_effect>0)] vector[M-1] random_effect_raw;
+  array[ncol_X_random_eff[2] * (ncol_X_random_eff[2]>0)] vector[M-1] random_effect_raw_2;
 
   // SD hyperparameters of random effects
   array[2 * (is_random_effect>0)] real random_effect_sigma_mu;
   array[2 * (is_random_effect>0)] real random_effect_sigma_sigma;
 
-  // Within-grouping factor covariance (per cell type), matching BB
-  array[M * (is_random_effect>0)] vector[how_many_factors_in_random_design[1]] random_effect_sigma_raw;
-  array[M * (is_random_effect>0)] cholesky_factor_corr[how_many_factors_in_random_design[1] * (is_random_effect>0)] sigma_correlation_factor;
+  // Within-grouping factor covariance (per ILR coordinate)
+  array[(M-1) * (is_random_effect>0)] vector[how_many_factors_in_random_design[1]] random_effect_sigma_raw;
+  array[(M-1) * (is_random_effect>0)] cholesky_factor_corr[how_many_factors_in_random_design[1] * (is_random_effect>0)] sigma_correlation_factor;
 
-  array[M * (is_random_effect>0)] vector[how_many_factors_in_random_design[2]] random_effect_sigma_raw_2;
-  array[M * (is_random_effect>0)] cholesky_factor_corr[how_many_factors_in_random_design[2] * (is_random_effect>0)] sigma_correlation_factor_2;
+  array[(M-1) * (is_random_effect>0)] vector[how_many_factors_in_random_design[2]] random_effect_sigma_raw_2;
+  array[(M-1) * (is_random_effect>0)] cholesky_factor_corr[how_many_factors_in_random_design[2] * (is_random_effect>0)] sigma_correlation_factor_2;
 
   // If I have just one group
   array[is_random_effect>0] real zero_random_effect;
@@ -189,51 +189,43 @@ transformed parameters{
   matrix[Br, M-1] Xbeta = XB*beta;
   matrix[Cr, (M-1)*(M-1)] XtV = XC*tV;
 
-  // Non-centered SD of random effects (same transform as BB)
-  array[M * (ncol_X_random_eff[1]> 0)] vector[how_many_factors_in_random_design[1]] random_effect_sigma;
-  if(ncol_X_random_eff[1]> 0) for(m in 1:M) random_effect_sigma[m] = random_effect_sigma_mu[1] + random_effect_sigma_sigma[1] * random_effect_sigma_raw[m];
-  if(ncol_X_random_eff[1]> 0) for(m in 1:M) random_effect_sigma[m] = exp(random_effect_sigma[m]/3.0);
+  // Non-centered SD of random effects (per ILR coordinate)
+  array[(M-1) * (ncol_X_random_eff[1]> 0)] vector[how_many_factors_in_random_design[1]] random_effect_sigma;
+  if(ncol_X_random_eff[1]> 0) for(k in 1:(M-1)) random_effect_sigma[k] = random_effect_sigma_mu[1] + random_effect_sigma_sigma[1] * random_effect_sigma_raw[k];
+  if(ncol_X_random_eff[1]> 0) for(k in 1:(M-1)) random_effect_sigma[k] = exp(random_effect_sigma[k]/3.0);
 
-  array[M * (ncol_X_random_eff[2]> 0)] vector[how_many_factors_in_random_design[2]] random_effect_sigma_2;
-  if(ncol_X_random_eff[2]> 0) for(m in 1:M) random_effect_sigma_2[m] = random_effect_sigma_mu[2] + random_effect_sigma_sigma[2] * random_effect_sigma_raw_2[m];
-  if(ncol_X_random_eff[2]> 0) for(m in 1:M) random_effect_sigma_2[m] = exp(random_effect_sigma_2[m]/3.0);
+  array[(M-1) * (ncol_X_random_eff[2]> 0)] vector[how_many_factors_in_random_design[2]] random_effect_sigma_2;
+  if(ncol_X_random_eff[2]> 0) for(k in 1:(M-1)) random_effect_sigma_2[k] = random_effect_sigma_mu[2] + random_effect_sigma_sigma[2] * random_effect_sigma_raw_2[k];
+  if(ncol_X_random_eff[2]> 0) for(k in 1:(M-1)) random_effect_sigma_2[k] = exp(random_effect_sigma_2[k]/3.0);
 
-  matrix[ncol_X_random_eff[1] * (is_random_effect>0), M] random_effect;
-  matrix[ncol_X_random_eff[2] * (is_random_effect>0), M] random_effect_2;
+  matrix[ncol_X_random_eff[1] * (is_random_effect>0), M-1] random_effect;
+  matrix[ncol_X_random_eff[2] * (is_random_effect>0), M-1] random_effect_2;
 
   if(ncol_X_random_eff[1]> 0){
-    array[ncol_X_random_eff[1]] vector[M] random_effect_raw_vec;
-    for(i in 1:ncol_X_random_eff[1]) {
-      random_effect_raw_vec[i] = to_vector(random_effect_raw[i]);
-    }
     random_effect =
       get_random_effect_matrix(
-        M,
+        M-1,
         n_groups[1],
         how_many_factors_in_random_design[1],
         is_random_effect,
         ncol_X_random_eff[1],
         group_factor_indexes_for_covariance,
-        random_effect_raw_vec,
+        random_effect_raw,
         random_effect_sigma,
         sigma_correlation_factor
       );
   }
 
   if(ncol_X_random_eff[2]>0 ){
-    array[ncol_X_random_eff[2]] vector[M] random_effect_raw_2_vec;
-    for(i in 1:ncol_X_random_eff[2]) {
-      random_effect_raw_2_vec[i] = to_vector(random_effect_raw_2[i]);
-    }
     random_effect_2 =
       get_random_effect_matrix(
-        M,
+        M-1,
         n_groups[2],
         how_many_factors_in_random_design[2],
         is_random_effect,
         ncol_X_random_eff[2],
         group_factor_indexes_for_covariance_2,
-        random_effect_raw_2_vec,
+        random_effect_raw_2,
         random_effect_sigma_2,
         sigma_correlation_factor_2
       );
@@ -300,11 +292,11 @@ model{
     offdiag_tV_raw[c] ~ std_normal();
   }
 
-  // Random effect priors (composition only; no mean–variability association)
+  // Random effect priors (ILR-native; no mean–variability association)
   if(is_random_effect>0){
-    for(m in 1:M) random_effect_raw[,m] ~ normal(0, inv(sqrt(1 - inv(M))));
-    for(m in 1:M) random_effect_sigma_raw[m] ~ std_normal();
-    for(m in 1:M) sigma_correlation_factor[m] ~ lkj_corr_cholesky(2);
+    for(k in 1:(M-1)) random_effect_raw[,k] ~ std_normal();
+    for(k in 1:(M-1)) random_effect_sigma_raw[k] ~ std_normal();
+    for(k in 1:(M-1)) sigma_correlation_factor[k] ~ lkj_corr_cholesky(2);
 
     random_effect_sigma_mu ~ std_normal();
     random_effect_sigma_sigma ~ std_normal();
@@ -312,8 +304,8 @@ model{
     zero_random_effect ~ std_normal();
   }
   if(ncol_X_random_eff[2]>0){
-    for(m in 1:M) random_effect_raw_2[,m] ~ normal(0, inv(sqrt(1 - inv(M))));
-    for(m in 1:M) random_effect_sigma_raw_2[m] ~ std_normal();
-    for(m in 1:M) sigma_correlation_factor_2[m] ~ lkj_corr_cholesky(2);
+    for(k in 1:(M-1)) random_effect_raw_2[,k] ~ std_normal();
+    for(k in 1:(M-1)) random_effect_sigma_raw_2[k] ~ std_normal();
+    for(k in 1:(M-1)) sigma_correlation_factor_2[k] ~ lkj_corr_cholesky(2);
   }
 }
