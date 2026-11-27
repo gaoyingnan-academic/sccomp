@@ -8,6 +8,26 @@ matrix canonical_Helmert(int M){
   return H;
 }
 
+// Map sample-level composition random effects (sum-to-zero over M cell groups)
+// into ILR space so they add to the LNM mean the same way BB adds them to logits.
+vector composition_re_to_ilr(
+  int n,
+  array[] int ncol_X_random_eff,
+  matrix X_random_effect,
+  matrix X_random_effect_2,
+  matrix random_effect,
+  matrix random_effect_2,
+  matrix Helmert
+) {
+  int M = rows(Helmert);
+  vector[M] re = rep_vector(0, M);
+  if(ncol_X_random_eff[1] > 0)
+    re += to_vector(X_random_effect[n,] * random_effect);
+  if(ncol_X_random_eff[2] > 0)
+    re += to_vector(X_random_effect_2[n,] * random_effect_2);
+  return Helmert' * re;
+}
+
 // likelihood of data given latent residual + parameters:
 real ll_function(
     vector u, // latent ILR residuals
@@ -56,6 +76,13 @@ real partial_sum_2_lpmf(
   
   // Fixed effect mapping
   array[,] int Xn_to_XQ,
+
+  // Random effects (composition-level, sample design; up to 2 groupings)
+  array[] int ncol_X_random_eff,
+  matrix X_random_effect,
+  matrix X_random_effect_2,
+  matrix random_effect,
+  matrix random_effect_2,
   
   // Helmert matrix
   matrix Helmert,
@@ -69,6 +96,7 @@ real partial_sum_2_lpmf(
     
     // calculate XLv when not precalculated
     matrix[M-1,M-1] this_XLv;
+    vector[M-1] this_beta;
 
     // If input is proportions
     if(is_proportion){
@@ -80,9 +108,16 @@ real partial_sum_2_lpmf(
           // expm via truncated Taylor's series
           this_XLv = unvectorized_matrix_exp_taylor(to_vector(XtV[Xn_to_XQ[idx_y[n],3],]),taylor_K,taylor_s);
         }
+        this_beta = to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],])
+          + composition_re_to_ilr(
+              idx_y[n], ncol_X_random_eff,
+              X_random_effect, X_random_effect_2,
+              random_effect, random_effect_2,
+              Helmert
+            );
         target_lp += multi_normal_cholesky_lpdf(
           y_proportion[idx_y[n],] |
-          to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],]), 
+          this_beta, 
           exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * this_XLv
         );
       }
@@ -97,9 +132,16 @@ real partial_sum_2_lpmf(
           // expm via truncated Taylor's series
           this_XLv = unvectorized_matrix_exp_taylor(to_vector(XtV[Xn_to_XQ[idx_y[n],3],]),taylor_K,taylor_s);
         }
+        this_beta = to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],])
+          + composition_re_to_ilr(
+              idx_y[n], ncol_X_random_eff,
+              X_random_effect, X_random_effect_2,
+              random_effect, random_effect_2,
+              Helmert
+            );
         target_lp += laplace_marginal_tol(
           ll_function, //custom log-likelihood function with latent residuals
-          (M,to_array_1d(y[idx_y[n],]),to_vector(Xbeta[Xn_to_XQ[idx_y[n],2],]),Helmert), //parameters without latent residuals
+          (M,to_array_1d(y[idx_y[n],]),this_beta,Helmert), //parameters without latent residuals
           M-1, // Hessian block size
           cov_function, //covariance function for latent residuals
           (exp(Xalpha_shift[Xn_to_XQ[idx_y[n],1]]) * this_XLv,M), // cov_function just converts it to VCoV
